@@ -26,6 +26,7 @@ import os
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -102,6 +103,10 @@ def _extract_string(data: Any, keys: Tuple[str, ...]) -> Optional[str]:
         value = data.get(key)
         if isinstance(value, str) and value:
             return value
+        if isinstance(value, dict):
+            found = _extract_string(value, keys)
+            if found:
+                return found
 
     for wrap_key in ("result", "data", "structuredContent"):
         wrapped = data.get(wrap_key)
@@ -532,11 +537,42 @@ class VStrikeService:
 
         Always fetches fresh — this token is meant to be one-shot.
         """
+        session = self.get_ui_login_session()
+        token = session.get("token")
+        if not token:
+            raise RuntimeError(f"VStrike ui-login-token returned no token: {session!r}")
+        return token
+
+    def get_ui_login_session(self) -> Dict[str, Optional[str]]:
+        """Return the one-shot iframe login token and URL from VStrike.
+
+        VStrike may return a complete ``loginUrl`` alongside the token. Prefer
+        that URL so Vigil does not have to guess the exact login path, port, or
+        query shape expected by the VStrike UI.
+        """
         result = self._call_mcp_tool("ui-login-token", {})
         token = _extract_string(result, ("token", "ui_login_token", "value"))
-        if not token:
-            raise RuntimeError(f"VStrike ui-login-token returned no token: {result!r}")
-        return token
+        login_url = _extract_string(result, ("loginUrl", "login_url", "loginURL"))
+        expires_on = _extract_string(
+            result, ("tokenExpiresOn", "token_expires_on", "expiresOn", "expires_at")
+        )
+
+        if not token and login_url:
+            parsed_token = parse_qs(urlparse(login_url).query).get("token")
+            if parsed_token:
+                token = parsed_token[0]
+
+        if not login_url and token:
+            login_url = f"{self.base_url}/login?token={token}"
+
+        if not token and not login_url:
+            raise RuntimeError(f"VStrike ui-login-token returned no login data: {result!r}")
+
+        return {
+            "token": token,
+            "login_url": login_url,
+            "token_expires_on": expires_on,
+        }
 
     def list_networks(self) -> List[Dict[str, Any]]:
         """Enumerate networks visible to the configured account."""
@@ -602,9 +638,12 @@ class VStrikeService:
             raise
 
     def iframe_url(self) -> str:
-        """Build the auto-login iframe URL using a fresh ui-login-token."""
-        token = self.get_ui_login_token()
-        return f"{self.base_url}/login?token={token}"
+        """Return the auto-login iframe URL using a fresh ui-login-token."""
+        session = self.get_ui_login_session()
+        login_url = session.get("login_url")
+        if not login_url:
+            raise RuntimeError(f"VStrike ui-login-token returned no login URL: {session!r}")
+        return login_url
 
     # ------------------------------------------------------------------ #
     # Data-plane MCP tools (node search, drift, storylines, legends)

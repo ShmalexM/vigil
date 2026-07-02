@@ -16,7 +16,8 @@ import FindingPopup from './FindingPopup'
 import AttackTechniqueFindings from './AttackTechniqueFindings'
 import { SEV_COLOR, TL_MONTHS, type TimelineEvent } from './attackData'
 import type { ScreenProps } from '../../shared/types'
-import EntityGraph, { type GraphLink, type GraphNode } from '../../../components/graph/EntityGraph'
+import EntityVisualization from '../../../components/graph/EntityVisualization'
+import type { GraphLink, GraphNode } from '../../../components/graph/EntityGraph'
 
 type DashTab = 'findings' | 'attack' | 'timeline' | 'entity'
 
@@ -757,7 +758,7 @@ function EntityTab() {
           ))}
         </div>
       </div>
-      <EntityGraph nodes={graph.nodes} links={graph.links} height="calc(100vh - 255px)" maxNodes={500} />
+      <EntityVisualization nodes={graph.nodes} links={graph.links} height="calc(100vh - 255px)" maxNodes={500} />
     </div>
   )
 }

@@ -369,13 +369,20 @@ async def ui_iframe_token() -> dict:
     """
     service = _ui_service_or_503()
     try:
-        token = service.get_ui_login_token()
+        session = service.get_ui_login_session()
     except Exception as e:
         logger.error("VStrike ui-login-token failed: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
+    token = session.get("token")
+    iframe_url = session.get("login_url")
+    if not token or not iframe_url:
+        raise HTTPException(
+            status_code=502,
+            detail=f"VStrike ui-login-token returned incomplete login data: {session!r}",
+        )
     return {
         "token": token,
-        "iframe_url": f"{service.base_url}/login?token={token}",
+        "iframe_url": iframe_url,
     }
 
 

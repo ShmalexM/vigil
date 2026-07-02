@@ -43,6 +43,13 @@ import {
   BubbleChart as BubbleIcon,
 } from '@mui/icons-material'
 
+function numericDimension(value: string | number | undefined): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (!value) return undefined
+  if (/^\d+(\.\d+)?(px)?$/.test(value.trim())) return parseInt(value, 10)
+  return undefined
+}
+
 export interface GraphNode extends NodeObject {
   id: string
   label: string
@@ -177,6 +184,7 @@ const EntityGraph = memo(function EntityGraph({
   maxNodes = 500,
 }: EntityGraphProps) {
   const graphRef = useRef<ForceGraphMethods<NodeObject<GraphNode>, LinkObject<GraphNode, GraphLink>>>()
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [layout, setLayout] = useState<'force' | 'spread' | 'tight'>('force')
@@ -184,9 +192,37 @@ const EntityGraph = memo(function EntityGraph({
   const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set())
   const [hoverNode, setHoverNode] = useState<GraphNode | null>(null)
   const [loading, setLoading] = useState(false)
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
   
   // Use ref to track highlighted nodes prop to avoid infinite loops
   const highlightedNodesRef = useRef<string[]>(highlightedNodes)
+
+  const explicitWidth = numericDimension(width)
+  const explicitHeight = numericDimension(height)
+  const graphWidth = explicitWidth || containerSize.width || undefined
+  const graphHeight = explicitHeight || containerSize.height || 600
+
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect()
+      setContainerSize((prev) => {
+        const next = {
+          width: Math.max(0, Math.floor(rect.width)),
+          height: Math.max(0, Math.floor(rect.height)),
+        }
+        return prev.width === next.width && prev.height === next.height ? prev : next
+      })
+    }
+
+    updateSize()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateSize)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [width, height])
 
   // Memoize filtered nodes
   const filteredNodes = useMemo(() => {
@@ -728,6 +764,7 @@ const EntityGraph = memo(function EntityGraph({
 
       {/* Graph */}
       <Paper 
+        ref={containerRef}
         sx={{ 
           position: 'relative', 
           bgcolor: '#fafafa',
@@ -758,8 +795,8 @@ const EntityGraph = memo(function EntityGraph({
         <ForceGraph2D
           ref={graphRef}
           graphData={{ nodes: filteredNodes, links: filteredLinks }}
-          width={typeof width === 'string' ? parseInt(width) : width}
-          height={typeof height === 'string' ? parseInt(height) : height}
+          width={graphWidth}
+          height={graphHeight}
           nodeRelSize={5}
           nodeCanvasObject={paintNode}
           linkCanvasObject={paintLink}
@@ -867,4 +904,3 @@ const EntityGraph = memo(function EntityGraph({
 })
 
 export default EntityGraph
-

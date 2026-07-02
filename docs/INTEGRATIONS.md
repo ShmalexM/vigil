@@ -476,13 +476,17 @@ Either set env vars (recommended for push/CI) or configure via the UI:
 
 ```bash
 # .env
-VSTRIKE_BASE_URL="https://vstrike.example.com"
-VSTRIKE_API_KEY="<outbound bearer token>"
+VSTRIKE_BASE_URL="https://vstrike.net"
 VSTRIKE_VERIFY_SSL="true"
 VSTRIKE_INBOUND_API_KEY="<bearer token Vigil expects on inbound push>"
+VSTRIKE_USERNAME="deeptempo_manager"
+VSTRIKE_PASSWORD="<password provided out-of-band>"
 ```
 
 UI: **Settings → Integrations → CloudCurrent VStrike**.
+
+For the TAC OT Water setup, see
+[`docs/integrations/tac-ot-water-vstrike.md`](integrations/tac-ot-water-vstrike.md).
 
 ### Storage model
 

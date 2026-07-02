@@ -521,7 +521,7 @@ def test_killchain_replay_in_ui_propagates_other_runtime_errors():
         assert "connection refused" in str(exc_info.value)
 
 
-def test_iframe_url_embeds_token():
+def test_iframe_url_embeds_token_when_login_url_missing():
     svc = _ui_service(base_url="https://vstrike.net")
     _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
     with patch(
@@ -532,6 +532,47 @@ def test_iframe_url_embeds_token():
     ):
         url = svc.iframe_url()
     assert url == "https://vstrike.net/login?token=short-lived-abc"
+
+
+def test_iframe_url_prefers_upstream_login_url():
+    svc = _ui_service(base_url="https://vstrike.net")
+    _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
+    with patch(
+        "services.vstrike_service.requests.post",
+        return_value=_mock_response(
+            200,
+            json_body={
+                "result": {
+                    "token": "short-lived-abc",
+                    "loginUrl": "https://vstrike.net:443/login?token=short-lived-abc",
+                }
+            },
+        ),
+    ):
+        url = svc.iframe_url()
+    assert url == "https://vstrike.net:443/login?token=short-lived-abc"
+
+
+def test_get_ui_login_token_unwraps_nested_token_value():
+    svc = _ui_service()
+    _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
+    with patch(
+        "services.vstrike_service.requests.post",
+        return_value=_mock_response(
+            200,
+            json_body={
+                "result": {
+                    "token": {
+                        "ui_login_token": {
+                            "value": "nested-token-abc",
+                        }
+                    }
+                }
+            },
+        ),
+    ):
+        token = svc.get_ui_login_token()
+    assert token == "nested-token-abc"
 
 
 # ---------------------------------------------------------------------------
@@ -905,8 +946,9 @@ def test_call_mcp_tool_parses_sse_with_structured_content():
         "services.vstrike_service.requests.post",
         return_value=_sse_response(body),
     ):
-        token = svc.get_ui_login_token()
-    assert token == "DV3VK7JWZG"
+        session = svc.get_ui_login_session()
+    assert session["token"] == "DV3VK7JWZG"
+    assert session["login_url"] == "https://vstrike.net:443/login?token=DV3VK7JWZG"
 
 
 def test_list_networks_parses_sse_with_structured_content():

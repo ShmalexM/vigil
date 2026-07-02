@@ -66,8 +66,8 @@ const _cache: { entry: CachedProbe | null } = { entry: null }
 
 async function probeVStrike(): Promise<ProbeState> {
   try {
-    const tokenResp = await vstrikeApi.iframeToken()
-    if (tokenResp.data?.iframe_url && tokenResp.data?.token) {
+    const networksResp = await vstrikeApi.listNetworks()
+    if (Array.isArray(networksResp.data?.networks)) {
       return { kind: 'ready' }
     }
     return { kind: 'unavailable' }

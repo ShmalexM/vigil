@@ -17,6 +17,8 @@ import ErrorBoundary from './shell/ErrorBoundary'
 import { ToastProvider } from './shell/toast'
 import { useDesktopNotifications } from './shell/useDesktopNotifications'
 import { RedesignThemeProvider, useSocTheme } from './shell/theme'
+import VStrikeIframeHost from '../components/graph/VStrikeIframeHost'
+import { VStrikeIframeProvider } from '../contexts/VStrikeIframeContext'
 import type { ScreenProps } from './shared/types'
 import DashboardScreen from './screens/dashboard/DashboardScreen'
 import CasesScreen from './screens/cases/CasesScreen'
@@ -59,7 +61,10 @@ export default function SocConsole() {
   // shell (which both styles .soc-console and renders the settings screen).
   return (
     <RedesignThemeProvider>
-      <SocConsoleInner />
+      <VStrikeIframeProvider>
+        <SocConsoleInner />
+        <VStrikeIframeHost />
+      </VStrikeIframeProvider>
     </RedesignThemeProvider>
   )
 }

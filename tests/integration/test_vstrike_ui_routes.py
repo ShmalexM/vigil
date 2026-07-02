@@ -35,6 +35,17 @@ def _mock_ui_service(**overrides):
     svc.has_ui_credentials = overrides.get("has_ui_credentials", True)
     svc.has_api_credentials = overrides.get("has_api_credentials", True)
     svc.get_ui_login_token.return_value = overrides.get("ui_login_token", "tok-xyz")
+    svc.get_ui_login_session.return_value = overrides.get(
+        "ui_login_session",
+        {
+            "token": overrides.get("ui_login_token", "tok-xyz"),
+            "login_url": (
+                f"{overrides.get('base_url', 'https://vstrike.example.com')}"
+                f"/login?token={overrides.get('ui_login_token', 'tok-xyz')}"
+            ),
+            "token_expires_on": None,
+        },
+    )
     svc.list_networks.return_value = overrides.get(
         "networks", [{"id": "n-1", "name": "Prod"}]
     )
@@ -56,7 +67,26 @@ def test_iframe_token_returns_token_and_url():
 
     assert result["token"] == "tok-abc"
     assert result["iframe_url"] == "https://vstrike.net/login?token=tok-abc"
-    svc.get_ui_login_token.assert_called_once_with()
+    svc.get_ui_login_session.assert_called_once_with()
+
+
+def test_iframe_token_uses_upstream_login_url():
+    from backend.api import vstrike as vstrike_module
+
+    svc = _mock_ui_service(
+        base_url="https://vstrike.net",
+        ui_login_session={
+            "token": "tok-abc",
+            "login_url": "https://vstrike.net:443/login?token=tok-abc",
+            "token_expires_on": "2026-07-02T17:29:42.231Z",
+        },
+    )
+    with patch.object(vstrike_module, "get_vstrike_service", return_value=svc):
+        result = asyncio.run(vstrike_module.ui_iframe_token())
+
+    assert result["token"] == "tok-abc"
+    assert result["iframe_url"] == "https://vstrike.net:443/login?token=tok-abc"
+    svc.get_ui_login_session.assert_called_once_with()
 
 
 def test_iframe_token_503_when_ui_credentials_missing():
@@ -88,7 +118,7 @@ def test_iframe_token_502_when_upstream_fails():
     from backend.api import vstrike as vstrike_module
 
     svc = _mock_ui_service()
-    svc.get_ui_login_token.side_effect = RuntimeError("upstream blew up")
+    svc.get_ui_login_session.side_effect = RuntimeError("upstream blew up")
     with patch.object(vstrike_module, "get_vstrike_service", return_value=svc):
         with pytest.raises(HTTPException) as exc_info:
             asyncio.run(vstrike_module.ui_iframe_token())
