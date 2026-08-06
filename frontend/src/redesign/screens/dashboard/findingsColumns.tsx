@@ -6,7 +6,7 @@ import type { Finding } from '../../data/data'
 const NDASH = '—'
 
 const SEV_RANK: Record<Finding['sev'], number> = { Critical: 4, High: 3, Medium: 2, Low: 1 }
-const STATUS_RANK: Record<Finding['status'], number> = { open: 0, investigating: 1, closed: 2 }
+const STATUS_RANK: Record<Finding['status'], number> = { open: 0, investigating: 1, resolved: 2, closed: 2 }
 
 /** comparable time key: findings normally carry epoch-ms `ts`; when it's
  *  missing, fall back to the YYYYMMDD in the id plus HH:MM from the display string */

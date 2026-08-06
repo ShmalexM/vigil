@@ -16,17 +16,44 @@ import FindingPopup from './FindingPopup'
 import AttackTechniqueFindings from './AttackTechniqueFindings'
 import { SEV_COLOR, TL_MONTHS, type TimelineEvent } from './attackData'
 import type { ScreenProps } from '../../shared/types'
+import { findingsApi } from '../../../services/api'
+import {
+  datasetScopeCounts,
+  type DatasetFacets,
+  type DatasetScope,
+} from './datasetScope'
+import VStrikeEntityView from './VStrikeEntityView'
 
 type DashTab = 'findings' | 'attack' | 'timeline' | 'entity'
 
 export default function DashboardScreen({ openChat, goSettings }: ScreenProps) {
   const [tab, setTab] = useState<DashTab>('findings')
+  const [datasetScope, setDatasetScope] = useState<DatasetScope>('all')
+  const [datasetFacets, setDatasetFacets] = useState<DatasetFacets | null>(null)
   const tabs: [DashTab, string][] = [
     ['findings', 'Findings'],
     ['attack', 'ATT&CK'],
     ['timeline', 'Timeline'],
     ['entity', 'Entity Graph'],
   ]
+  useEffect(() => {
+    let cancelled = false
+    const loadFacets = () => {
+      findingsApi.getDatasetFacets().then((res) => {
+        if (!cancelled) setDatasetFacets((res.data || {}) as DatasetFacets)
+      }).catch(() => {
+        /* The selector still works when counts are temporarily unavailable. */
+      })
+    }
+    loadFacets()
+    const id = setInterval(loadFacets, 10_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [])
+  const datasetCounts = datasetScopeCounts(datasetFacets)
+  const countSuffix = (count: number | null) => count === null ? '' : ` (${count})`
   return (
     <>
       <div className="flex items-center gap-3 flex-wrap px-[22px] py-[13px] border-b border-line tabbar">
@@ -43,11 +70,24 @@ export default function DashboardScreen({ openChat, goSettings }: ScreenProps) {
             </button>
           ))}
         </div>
+        <div className="flex-1" />
+        <label className="dataset-scope">
+          <span>Dataset</span>
+          <select
+            aria-label="Dashboard dataset"
+            value={datasetScope}
+            onChange={(event) => setDatasetScope(event.target.value as DatasetScope)}
+          >
+            <option value="all">All{countSuffix(datasetCounts.all)}</option>
+            <option value="existing">Existing{countSuffix(datasetCounts.existing)}</option>
+            <option value="ws3">WS3 demo{countSuffix(datasetCounts.ws3)}</option>
+          </select>
+        </label>
       </div>
-      {tab === 'findings' && <FindingsTab openChat={openChat} goSettings={goSettings} />}
-      {tab === 'attack' && <AttackTab />}
-      {tab === 'timeline' && <TimelineTab />}
-      {tab === 'entity' && <EntityStub />}
+      {tab === 'findings' && <FindingsTab openChat={openChat} goSettings={goSettings} datasetScope={datasetScope} />}
+      {tab === 'attack' && <AttackTab datasetScope={datasetScope} />}
+      {tab === 'timeline' && <TimelineTab datasetScope={datasetScope} />}
+      {tab === 'entity' && <VStrikeEntityView goSettings={goSettings} />}
     </>
   )
 }
@@ -64,9 +104,13 @@ function findingPrompt(f: Finding): string {
   return `Investigate finding ${f.id} — ${parts.join(', ')}. What happened and what should I do next?`
 }
 
-function FindingsTab({ openChat, goSettings }: Pick<ScreenProps, 'openChat' | 'goSettings'>) {
-  const { rows, phase, error, reload } = useFindings()
-  const { kpis, reload: reloadKpis } = useDashboardKpis()
+function FindingsTab({
+  openChat,
+  goSettings,
+  datasetScope,
+}: Pick<ScreenProps, 'openChat' | 'goSettings'> & { datasetScope: DatasetScope }) {
+  const { rows, phase, error, reload } = useFindings(datasetScope)
+  const { kpis, reload: reloadKpis } = useDashboardKpis(datasetScope)
   const [query, setQuery] = useState('')
   const [sev, setSev] = useState('any')
   const [src, setSrc] = useState('any')
@@ -266,11 +310,11 @@ function sevB(n: number, cls: string) {
   return n ? <span className={`scount ${cls}`}>{n}</span> : <span className="scount zero">·</span>
 }
 
-function AttackTab() {
+function AttackTab({ datasetScope }: { datasetScope: DatasetScope }) {
   const [range, setRange] = useState('All')
   const [conf, setConf] = useState(0)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const { data, phase, error, reload } = useAttack(conf, range)
+  const { data, phase, error, reload } = useAttack(conf, range, datasetScope)
   const toggle = (id: string) => setExpanded((cur) => (cur === id ? null : id))
 
   const techniques = data?.techniques ?? []
@@ -370,7 +414,7 @@ function AttackTab() {
                       </td>
                     </tr>
                     {expanded === t.id && (
-                      <tr className="tech-expand"><td colSpan={9}><AttackTechniqueFindings techniqueId={t.id} /></td></tr>
+                      <tr className="tech-expand"><td colSpan={9}><AttackTechniqueFindings techniqueId={t.id} datasetScope={datasetScope} /></td></tr>
                     )}
                   </Fragment>
                 ))}
@@ -380,19 +424,6 @@ function AttackTab() {
         </div>
       </div>
     </>
-  )
-}
-
-/* ---------------- Entity Graph (stub) ---------------- */
-function EntityStub() {
-  return (
-    <div className="entity-empty">
-      <EmptyState
-        icon="graph"
-        title="No entity graph yet"
-        body="Host, user, and source relationships appear here once findings include entity fields."
-      />
-    </div>
   )
 }
 
@@ -477,7 +508,7 @@ function computeLayout(events: TimelineEvent[], zoom: number, containerW: number
   return { min, max, pxPerDay, innerW, plotH, bars, ticks, grids, months }
 }
 
-function TimelineTab() {
+function TimelineTab({ datasetScope }: { datasetScope: DatasetScope }) {
   const [filter, setFilter] = useState<'all' | 'finding'>('all')
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
@@ -496,7 +527,7 @@ function TimelineTab() {
   const speedRef = useRef(1)
   const downRef = useRef(false)
 
-  const { events: tlEvents, phase: tlPhase } = useTimeline()
+  const { events: tlEvents, phase: tlPhase } = useTimeline(datasetScope)
   const events = useMemo(() => tlEvents.filter((e) => filter === 'all' || e.kind === 'finding'), [tlEvents, filter])
   const layout = useMemo(() => computeLayout(events, zoom, containerW), [events, zoom, containerW])
   const layoutRef = useRef(layout)

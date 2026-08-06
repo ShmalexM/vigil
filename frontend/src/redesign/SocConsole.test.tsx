@@ -72,6 +72,7 @@ vi.mock('../services/api', () => ({
         data: { finding_id: id, severity: 'critical', data_source: 'edr', timestamp: '2026-06-14T17:30:00Z', mitre_predictions: { 'T1567.002': 0.98 } },
       }),
     getSummary: () => Promise.resolve({ data: { total: 40, by_severity: { critical: 7, high: 8, medium: 18, low: 7 } } }),
+    getDatasetFacets: () => Promise.resolve({ data: { datasets: [], unassigned: 40, total: 40 } }),
   },
   agentsApi: {
     listAgents: () =>
@@ -118,6 +119,15 @@ vi.mock('../services/api', () => ({
       Promise.resolve({
         data: { events: [{ id: 'finding-f-1', start: '2026-06-12T11:36:33Z', type: 'finding', severity: 'medium', metadata: { finding_id: 'f-1' } }] },
       }),
+  },
+  vstrikeApi: {
+    iframeToken: () => Promise.resolve({ data: { token: 'test', iframe_url: 'about:blank' } }),
+    listNetworks: () => Promise.resolve({ data: { networks: [{ id: 'net-1', name: 'OT TAC Water Range' }] } }),
+    loadNetwork: () => Promise.resolve({ data: { ok: true } }),
+    listStorylines: () => Promise.resolve({ data: { storylines: [{ id: 'story-1', name: 'Demo storyline' }] } }),
+    uiStorylineApply: () => Promise.resolve({ data: { ok: true } }),
+    uiStorylineBackward: () => Promise.resolve({ data: { ok: true } }),
+    uiStorylineForward: () => Promise.resolve({ data: { ok: true } }),
   },
   // AI Decisions screen — Pending tab (getPendingFeedback) + stats KPIs.
   aiDecisionsApi: {
@@ -256,9 +266,13 @@ describe('SocConsole redesign', () => {
     // Timeline (exercises ResizeObserver + layout math); count resolves async
     fireEvent.click(screen.getByRole('tab', { name: 'Timeline' }))
     expect(await screen.findByText(/events$/)).toBeInTheDocument()
-    // Entity Graph empty state
+    // Entity Graph mounts the VStrike surface. The iframe itself belongs to
+    // the app shell, so leaving the tab must not replace the session element.
     fireEvent.click(screen.getByRole('tab', { name: 'Entity Graph' }))
-    expect(screen.getByText('No entity graph yet')).toBeInTheDocument()
+    expect(screen.getByText(/VStrike is network-scoped/)).toBeInTheDocument()
+    const iframe = await screen.findByTitle('CloudCurrent VStrike network visualization')
+    fireEvent.click(screen.getByRole('tab', { name: 'Findings' }))
+    expect(screen.getByTitle('CloudCurrent VStrike network visualization')).toBe(iframe)
   })
 
   it('opens the Cases master-detail and returns to the table', async () => {

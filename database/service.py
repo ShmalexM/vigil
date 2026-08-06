@@ -165,6 +165,8 @@ class DatabaseService:
         min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None,
         search_query: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        exclude_dataset_id: Optional[str] = None,
         limit: int = 1000,
         offset: int = 0,
         sort_by: str = "timestamp",
@@ -180,6 +182,8 @@ class DatabaseService:
             min_anomaly_score: Minimum anomaly score
             status: Filter by status
             search_query: Text search across finding_id, description, entity_context
+            dataset_id: Exact normalized dataset ID match
+            exclude_dataset_id: Exclude an exact normalized dataset ID
             limit: Maximum number of results
             offset: Offset for pagination
             sort_by: Column to sort by (timestamp, anomaly_score, severity)
@@ -203,6 +207,16 @@ class DatabaseService:
                     filters.append(Finding.anomaly_score >= min_anomaly_score)
                 if status:
                     filters.append(Finding.status == status)
+                dataset_expr = func.coalesce(
+                    Finding.entity_context["dataset_id"].astext,
+                    Finding.entity_context["demo_dataset"].astext,
+                )
+                if dataset_id is not None:
+                    filters.append(dataset_expr == dataset_id)
+                if exclude_dataset_id is not None:
+                    filters.append(
+                        or_(dataset_expr.is_(None), dataset_expr != exclude_dataset_id)
+                    )
                 if search_query:
                     from sqlalchemy import cast, String
                     search_clauses = [
@@ -316,6 +330,8 @@ class DatabaseService:
         min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None,
         search_query: Optional[str] = None,
+        dataset_id: Optional[str] = None,
+        exclude_dataset_id: Optional[str] = None,
     ) -> int:
         """
         Count findings matching the given filters without loading rows.
@@ -335,6 +351,16 @@ class DatabaseService:
                     filters.append(Finding.anomaly_score >= min_anomaly_score)
                 if status:
                     filters.append(Finding.status == status)
+                dataset_expr = func.coalesce(
+                    Finding.entity_context["dataset_id"].astext,
+                    Finding.entity_context["demo_dataset"].astext,
+                )
+                if dataset_id is not None:
+                    filters.append(dataset_expr == dataset_id)
+                if exclude_dataset_id is not None:
+                    filters.append(
+                        or_(dataset_expr.is_(None), dataset_expr != exclude_dataset_id)
+                    )
                 if search_query:
                     from sqlalchemy import cast, String
                     filters.append(
@@ -352,6 +378,32 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error counting findings: {e}")
             return 0
+
+    def get_finding_dataset_counts(self) -> List[Dict[str, Any]]:
+        """Return counts grouped by normalized dataset identity.
+
+        ``demo_dataset`` is the legacy alias. A SQL expression keeps this
+        migration-free and mirrors the JSON fallback behavior.
+        """
+        try:
+            with self.db_manager.session_scope() as session:
+                dataset_expr = func.coalesce(
+                    Finding.entity_context["dataset_id"].astext,
+                    Finding.entity_context["demo_dataset"].astext,
+                ).label("dataset_id")
+                query = (
+                    select(dataset_expr, func.count().label("count"))
+                    .select_from(Finding)
+                    .group_by(dataset_expr)
+                    .order_by(dataset_expr.asc().nulls_last())
+                )
+                return [
+                    {"dataset_id": row.dataset_id, "count": int(row.count)}
+                    for row in session.execute(query)
+                ]
+        except Exception as e:
+            logger.error(f"Error getting finding dataset counts: {e}")
+            return []
 
     def update_finding(self, finding_id: str, **updates) -> bool:
         """
@@ -1015,4 +1067,3 @@ class DatabaseService:
                 'total_time_saved_hours': 0,
                 'period_days': days
             }
-

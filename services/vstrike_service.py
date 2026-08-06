@@ -260,6 +260,14 @@ class VStrikeService:
         except requests.exceptions.RequestException as e:
             return False, f"Connection error: {e}"
 
+    def test_ui_connection(self) -> Tuple[bool, str]:
+        """Probe the MCP/UI control plane independently of legacy REST health."""
+        try:
+            networks = self.list_networks()
+            return True, f"UI/MCP control plane reachable ({len(networks)} networks)"
+        except Exception as e:
+            return False, f"UI/MCP connection error: {e}"
+
     def get_asset_topology(self, asset_id: str) -> Optional[Dict[str, Any]]:
         """Return full topology info for an asset (neighbors, segment, site)."""
         try:
@@ -661,9 +669,9 @@ class VStrikeService:
         self, storyline_id: str, *, network_id: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """List events in a storyline along with their properties."""
-        args: Dict[str, Any] = {"storylineId": storyline_id}
-        if network_id:
-            args["networkId"] = network_id
+        # The live tool identifies these collections as storyline *sets* and
+        # rejects the older storylineId/networkId shape.
+        args: Dict[str, Any] = {"storylineSetId": storyline_id}
         try:
             result = self._call_mcp_tool("storyline-events-get", args)
             return _extract_list(result, ("events", "results", "items", "data"))
@@ -744,9 +752,12 @@ class VStrikeService:
         network_id: Optional[str] = None,
     ) -> Any:
         """Set the camera position and rotation explicitly."""
-        args: Dict[str, Any] = {"position": position}
-        if rotation:
-            args["rotation"] = rotation
+        args: Dict[str, Any] = {
+            "position": [position.get(axis, 0.0) for axis in ("x", "y", "z")],
+            "rotation": [
+                (rotation or {}).get(axis, 0.0) for axis in ("roll", "pitch", "yaw")
+            ],
+        }
         if network_id:
             args["networkId"] = network_id
         return self._call_mcp_tool("ui-camera-position", args)
@@ -755,7 +766,7 @@ class VStrikeService:
         self, storyline_id: str, *, network_id: Optional[str] = None
     ) -> Any:
         """Apply the specified storyline to the active network view."""
-        args: Dict[str, Any] = {"storylineId": storyline_id}
+        args: Dict[str, Any] = {"storylineSetId": storyline_id}
         if network_id:
             args["networkId"] = network_id
         return self._call_mcp_tool("ui-storyline-apply", args)
@@ -763,23 +774,15 @@ class VStrikeService:
     def ui_storyline_mode(self, mode: str, *, network_id: Optional[str] = None) -> Any:
         """Set the timeslice mode for the VCR controls and reset frame counters."""
         args: Dict[str, Any] = {"mode": mode}
-        if network_id:
-            args["networkId"] = network_id
         return self._call_mcp_tool("ui-storyline-mode", args)
 
     def ui_storyline_forward(self, *, network_id: Optional[str] = None) -> Any:
         """Step forward in the storyline timeline."""
-        args: Dict[str, Any] = {}
-        if network_id:
-            args["networkId"] = network_id
-        return self._call_mcp_tool("ui-storyline-forward", args)
+        return self._call_mcp_tool("ui-storyline-forward", {})
 
     def ui_storyline_backward(self, *, network_id: Optional[str] = None) -> Any:
         """Step backward in the storyline timeline."""
-        args: Dict[str, Any] = {}
-        if network_id:
-            args["networkId"] = network_id
-        return self._call_mcp_tool("ui-storyline-backward", args)
+        return self._call_mcp_tool("ui-storyline-backward", {})
 
     # ------------------------------------------------------------------ #
     # Defensive wrappers for VStrike's net-new MCP tools.

@@ -141,9 +141,14 @@ export default function CustomIntegrationBuilder({ onClose, onSave }: Props) {
   }
 
   const next = () => {
-    if (step === 0) (needsClarification ? generate(userAnswer) : generate())
-    else if (step === 1) validate()
-    else finalSave()
+    if (step === 0) {
+      if (needsClarification) generate(userAnswer)
+      else generate()
+    } else if (step === 1) {
+      validate()
+    } else {
+      finalSave()
+    }
   }
 
   const nextLabel = loading ? 'Processing…' : step === 2 ? 'Save Integration' : step === 1 ? 'Validate' : needsClarification ? 'Send Answer' : 'Generate'

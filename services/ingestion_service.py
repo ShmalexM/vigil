@@ -15,6 +15,7 @@ import json
 import csv
 import hashlib
 import logging
+import math
 import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
@@ -79,6 +80,36 @@ def row_identity_key(row: Dict[str, Any], columns: tuple) -> str:
             ).hexdigest()
         parts.append(f"{column}={value!r}")
     return '|'.join(parts)
+
+
+def _coerce_optional_verdict(value: Any, field_name: str) -> Optional[bool]:
+    """Normalize an optional boolean verdict and reject ambiguous values."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "malicious", "attack"}:
+        return True
+    if normalized in {"false", "0", "no", "benign", "normal", "clean"}:
+        return False
+    raise ValueError(f"Invalid {field_name} verdict: {value!r}")
+
+
+def _label_verdict(value: Any) -> Optional[bool]:
+    """Map recognized class labels to an attack/benign verdict."""
+    if value is None:
+        return None
+    normalized = str(value).strip().lower().replace("_", "-")
+    if normalized in {"malicious", "attack", "anomalous", "threat", "1", "true"}:
+        return True
+    if normalized in {
+        "benign", "normal", "clean", "non-malicious", "0", "false"
+    }:
+        return False
+    return None
 
 
 class IngestionService:
@@ -851,7 +882,6 @@ class IngestionService:
         mitre_predictions = {}
         mitre_logits = row.get('mitre_logits')
         if mitre_logits is not None and len(mitre_logits) > 0:
-            import math
             max_l = max(mitre_logits)
             exps = [math.exp(l - max_l) for l in mitre_logits]
             total = sum(exps)
@@ -867,30 +897,75 @@ class IngestionService:
             else:
                 mitre_predictions[f"mitre_class_{int(mitre_pred)}"] = 1.0
 
-        # Severity from incident_pred (1=attack, 0=benign)
-        incident_pred = int(row.get('incident_pred', 0))
+        # incident_pred is the predicted class, while confidence_score is the
+        # model's confidence in that class (not an anomaly score).
+        raw_incident_pred = row.get('incident_pred')
+        incident_pred = int(raw_incident_pred) if raw_incident_pred is not None else 0
+        if incident_pred not in (0, 1):
+            raise ValueError(
+                f"incident_pred must be 0 (benign) or 1 (attack), got {raw_incident_pred!r}"
+            )
         is_attack = incident_pred == 1
 
-        # anomaly_score from confidence_score if available, else derive from incident_pred
-        confidence = row.get('confidence_score')
-        if confidence is not None:
-            anomaly_score = float(confidence)
-        else:
-            anomaly_score = 0.85 if is_attack else 0.15
+        raw_confidence = row.get('confidence_score')
+        confidence_defaulted = raw_confidence is None
+        prediction_confidence = (
+            0.85 if confidence_defaulted else float(raw_confidence)
+        )
+        if not math.isfinite(prediction_confidence) or not 0.0 <= prediction_confidence <= 1.0:
+            raise ValueError(
+                f"confidence_score must be between 0 and 1, got {raw_confidence!r}"
+            )
+
+        malicious_verdict = _coerce_optional_verdict(row.get('malicious'), 'malicious')
+        label_verdict = _label_verdict(row.get('label'))
+        if malicious_verdict is not None and malicious_verdict != is_attack:
+            raise ValueError(
+                "Contradictory verdict: incident_pred and malicious disagree"
+            )
+        if label_verdict is not None and label_verdict != is_attack:
+            raise ValueError(
+                "Contradictory verdict: incident_pred and label disagree"
+            )
+
+        anomaly_score = (
+            prediction_confidence if is_attack else 1.0 - prediction_confidence
+        )
 
         if is_attack:
-            severity = 'critical' if anomaly_score >= 0.9 else 'high'
+            if anomaly_score >= 0.9:
+                severity = 'critical'
+            elif anomaly_score >= 0.7:
+                severity = 'high'
+            elif anomaly_score >= 0.4:
+                severity = 'medium'
+            else:
+                severity = 'low'
         else:
-            severity = 'medium' if anomaly_score >= 0.5 else 'low'
+            severity = 'low'
 
         # Build entity_context with all available metadata
         entity_context = {
             'src_ip': row.get('focal_ip'),
             'dst_ip': row.get('engaged_ip'),
             'incident_pred': incident_pred,
-            'confidence_score': anomaly_score,
+            'prediction_confidence': prediction_confidence,
+            'confidence_score': prediction_confidence,
+            'confidence_defaulted': confidence_defaulted,
+            'verdict': 'attack' if is_attack else 'benign',
             'sequence_id': sequence_id,
         }
+
+        # Preserve the source verdict and run/model provenance needed to trace a
+        # dashboard observation back to its LogLM batch.
+        preserved_fields = (
+            'label', 'malicious', 'tenant', 'dataset_id', 'run_id', 'model_id',
+            'model_variant_id', 'chunk_start_ms', 'event_start', 'event_end',
+            'created_at',
+        )
+        for field in preserved_fields:
+            if row.get(field) is not None:
+                entity_context[field] = row[field]
 
         if row.get('event_start_time') is not None:
             entity_context['event_start_time'] = int(row['event_start_time'])
@@ -916,11 +991,15 @@ class IngestionService:
             'anomaly_score': anomaly_score,
             'timestamp': event_ts.isoformat(),
             'data_source': data_source,
+            'description': (
+                f"LogLM prediction: {'Attack' if is_attack else 'Benign'} "
+                f"(confidence {prediction_confidence:.4f})"
+            ),
             'entity_context': entity_context,
             'evidence_links': None,
             'cluster_id': cluster_id,
             'severity': severity,
-            'status': 'new',
+            'status': 'new' if is_attack else 'resolved',
         }
 
     def _detect_parquet_schema(self, col_names: set) -> str:

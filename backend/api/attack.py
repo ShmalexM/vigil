@@ -100,6 +100,8 @@ def get_attack_layer():
 def get_technique_rollup(
     min_confidence: float = 0.0,
     time_range: str = Query("all", pattern="^(24h|7d|30d|all)$"),
+    dataset_id: Optional[str] = Query(None, description="Exact normalized dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Dataset ID to exclude"),
 ):
     """
     Get rollup of ATT&CK techniques across all findings.
@@ -112,7 +114,10 @@ def get_technique_rollup(
         Technique statistics sorted by occurrence count, including
         human-readable technique name and tactic per row.
     """
-    findings = data_service.get_findings()
+    findings = data_service.get_findings(
+        dataset_id=dataset_id,
+        exclude_dataset_id=exclude_dataset_id,
+    )
 
     if time_range != "all":
         start_time, end_time = get_time_range(time_range)
@@ -178,7 +183,11 @@ def get_technique_rollup(
 
 
 @router.get("/techniques/{technique_id}/findings")
-def get_findings_by_technique(technique_id: str):
+def get_findings_by_technique(
+    technique_id: str,
+    dataset_id: Optional[str] = Query(None, description="Exact normalized dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Dataset ID to exclude"),
+):
     """
     Get all findings associated with a specific technique.
 
@@ -188,7 +197,10 @@ def get_findings_by_technique(technique_id: str):
     Returns:
         List of findings
     """
-    findings = data_service.get_findings()
+    findings = data_service.get_findings(
+        dataset_id=dataset_id,
+        exclude_dataset_id=exclude_dataset_id,
+    )
 
     matching_findings = []
 

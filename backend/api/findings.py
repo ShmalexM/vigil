@@ -37,6 +37,8 @@ class FindingFilter(BaseModel):
     data_source: Optional[str] = None
     cluster_id: Optional[int] = None
     min_anomaly_score: Optional[float] = None
+    dataset_id: Optional[str] = None
+    exclude_dataset_id: Optional[str] = None
     limit: Optional[int] = 100
 
 
@@ -48,6 +50,8 @@ def get_findings(
     min_anomaly_score: Optional[float] = Query(None),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None, description="Text search across finding IDs, descriptions, entity context"),
+    dataset_id: Optional[str] = Query(None, description="Exact normalized dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Dataset ID to exclude"),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     sort_by: str = Query("timestamp"),
@@ -74,12 +78,14 @@ def get_findings(
         severity=severity, data_source=data_source,
         cluster_id=cluster_id_str, min_anomaly_score=min_anomaly_score,
         status=status, search_query=search,
+        dataset_id=dataset_id, exclude_dataset_id=exclude_dataset_id,
     )
     findings = data_service.get_findings(
         limit=limit, offset=offset,
         severity=severity, data_source=data_source,
         cluster_id=cluster_id_str, min_anomaly_score=min_anomaly_score,
         status=status, search_query=search,
+        dataset_id=dataset_id, exclude_dataset_id=exclude_dataset_id,
         sort_by=sort_by, sort_order=sort_order,
         # The list view never uses the 768-float embedding — omit it so a
         # 1000-row page (polled every 10s) isn't several MB of vectors.
@@ -115,14 +121,21 @@ def get_finding(finding_id: str):
 
 
 @router.get("/stats/summary")
-def get_findings_summary():
+def get_findings_summary(
+    dataset_id: Optional[str] = Query(None, description="Exact normalized dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Dataset ID to exclude"),
+):
     """
     Get summary statistics for findings.
     
     Returns:
         Summary statistics
     """
-    findings = data_service.get_findings(include_embedding=False)
+    findings = data_service.get_findings(
+        include_embedding=False,
+        dataset_id=dataset_id,
+        exclude_dataset_id=exclude_dataset_id,
+    )
 
     # Calculate statistics
     severity_counts = {}
@@ -140,6 +153,19 @@ def get_findings_summary():
         "total": total_count,
         "by_severity": severity_counts,
         "by_data_source": data_source_counts
+    }
+
+
+@router.get("/stats/datasets")
+def get_finding_dataset_facets():
+    """Return normalized dataset IDs and finding counts."""
+    facets = data_service.get_finding_dataset_counts()
+    return {
+        "datasets": [facet for facet in facets if facet["dataset_id"] is not None],
+        "unassigned": sum(
+            facet["count"] for facet in facets if facet["dataset_id"] is None
+        ),
+        "total": sum(facet["count"] for facet in facets),
     }
 
 

@@ -173,9 +173,14 @@ export const approvalsApi = {
     api.post(`/approvals/${actionId}/reject`, { reason, rejected_by }),
 }
 
+export interface DatasetFilter {
+  dataset_id?: string
+  exclude_dataset_id?: string
+}
+
 // Findings API
 export const findingsApi = {
-  getAll: (params?: {
+  getAll: (params?: DatasetFilter & {
     severity?: string
     data_source?: string
     cluster_id?: number
@@ -186,7 +191,9 @@ export const findingsApi = {
   
   getById: (id: string) => api.get(`/findings/${id}`),
   
-  getSummary: () => api.get('/findings/stats/summary'),
+  getSummary: (params?: DatasetFilter) => api.get('/findings/stats/summary', { params }),
+
+  getDatasetFacets: () => api.get('/findings/stats/datasets'),
   
   export: (format: 'json' | 'jsonl' = 'json') =>
     api.post('/findings/export', null, { params: { output_format: format } }),
@@ -259,7 +266,7 @@ export const casesApi = {
   generateReport: (id: string) =>
     api.post(`/cases/${id}/generate-report`, null, { timeout: LLM_TIMEOUT }),
   
-  getSummary: () => api.get('/cases/stats/summary'),
+  getSummary: (params?: DatasetFilter) => api.get('/cases/stats/summary', { params }),
   
   // Comments
   getComments: (id: string) => api.get(`/cases/${id}/comments`),
@@ -1308,11 +1315,16 @@ export const timesketchApi = {
 export const attackApi = {
   getLayer: () => api.get('/attack/layer'),
   
-  getTechniqueRollup: (min_confidence: number = 0.0, time_range: string = 'all') =>
-    api.get('/attack/techniques/rollup', { params: { min_confidence, time_range } }),
+  getTechniqueRollup: (
+    min_confidence: number = 0.0,
+    time_range: string = 'all',
+    datasetFilter: DatasetFilter = {},
+  ) => api.get('/attack/techniques/rollup', {
+    params: { min_confidence, time_range, ...datasetFilter },
+  }),
   
-  getFindingsByTechnique: (technique_id: string) =>
-    api.get(`/attack/techniques/${technique_id}/findings`),
+  getFindingsByTechnique: (technique_id: string, datasetFilter: DatasetFilter = {}) =>
+    api.get(`/attack/techniques/${technique_id}/findings`, { params: datasetFilter }),
   
   getTacticsSummary: () => api.get('/attack/tactics/summary'),
 }
@@ -1324,7 +1336,7 @@ export const timelineApi = {
   getFindingContext: (finding_id: string, time_window_minutes: number = 60) =>
     api.get(`/timeline/finding/${finding_id}/context`, { params: { time_window_minutes } }),
   
-  getTimelineRange: (params: {
+  getTimelineRange: (params: DatasetFilter & {
     start?: string
     end?: string
     severity?: string

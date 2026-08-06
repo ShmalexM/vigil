@@ -36,6 +36,8 @@ export default defineConfig(({ mode }) => {
   // origins the backend uses for the CSP + SSRF guard (mirrors base-path).
   const extensionAllowlist =
     process.env.EXTENSION_CONNECTOR_ALLOWLIST || env.EXTENSION_CONNECTOR_ALLOWLIST || ''
+  const apiProxyTarget =
+    process.env.VITE_API_PROXY_TARGET || env.VITE_API_PROXY_TARGET || 'http://127.0.0.1:6987'
 
   return {
     base,
@@ -62,7 +64,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // Dev proxy must match the context-path-prefixed API calls.
         [`${contextPath}/api`]: {
-          target: 'http://127.0.0.1:6987', // Use IPv4 explicitly instead of localhost
+          target: apiProxyTarget,
           changeOrigin: true,
         },
       },
@@ -94,4 +96,3 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
-

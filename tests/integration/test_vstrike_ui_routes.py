@@ -127,6 +127,36 @@ def test_list_networks_503_without_ui_credentials():
     assert exc_info.value.status_code == 503
 
 
+def test_health_reports_working_ui_when_legacy_rest_returns_401():
+    from backend.api import vstrike as vstrike_module
+
+    svc = _mock_ui_service()
+    svc.test_connection.return_value = (False, "HTTP 401: unauthorized")
+    svc.test_ui_connection.return_value = (True, "UI/MCP control plane reachable")
+    with patch.object(vstrike_module, "get_vstrike_service", return_value=svc):
+        result = asyncio.run(vstrike_module.health_check())
+
+    assert result.configured is True
+    assert result.reachable is True
+    assert result.rest_reachable is False
+    assert result.ui_reachable is True
+    assert "UI is ready" in result.message
+
+
+def test_health_reports_both_vstrike_planes_unavailable():
+    from backend.api import vstrike as vstrike_module
+
+    svc = _mock_ui_service()
+    svc.test_connection.return_value = (False, "REST down")
+    svc.test_ui_connection.return_value = (False, "MCP down")
+    with patch.object(vstrike_module, "get_vstrike_service", return_value=svc):
+        result = asyncio.run(vstrike_module.health_check())
+
+    assert result.reachable is False
+    assert result.rest_reachable is False
+    assert result.ui_reachable is False
+
+
 # --------------------------------------------------------------------------- #
 # /ui/load-network
 # --------------------------------------------------------------------------- #

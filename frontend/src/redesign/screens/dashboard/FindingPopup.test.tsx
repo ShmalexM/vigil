@@ -33,6 +33,14 @@ function openFinding(entityContext: Record<string, unknown>) {
 describe('FindingPopup source evidence', () => {
   beforeEach(() => vi.clearAllMocks())
 
+  it('shows predicted-class confidence independently from anomaly score', async () => {
+    openFinding({ prediction_confidence: 0.88 })
+
+    expect(await screen.findByText('88%')).toBeInTheDocument()
+    expect(screen.getByText('prediction confidence')).toBeInTheDocument()
+    expect(screen.getByText('0.92')).toBeInTheDocument()
+  })
+
   it('hides the section when the finding has no declared evidence contract', async () => {
     openFinding({})
     await screen.findByText('f-source-1')

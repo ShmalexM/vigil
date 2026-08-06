@@ -56,7 +56,7 @@ export interface Finding {
    *  (the `time` string above is display-only and not safely comparable) */
   ts?: number
   score: number
-  status: 'open' | 'investigating' | 'closed'
+  status: 'open' | 'investigating' | 'resolved' | 'closed'
   /** entity_context keys the fixed fields above don't cover. Sources disagree
    *  about these — CrowdStrike sends device_id and no dest_ips, Splunk the
    *  reverse — so they're carried through rather than dropped, and rendered as

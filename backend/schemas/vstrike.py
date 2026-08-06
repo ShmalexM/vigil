@@ -121,5 +121,9 @@ class VStrikeHealthResponse(BaseModel):
 
     configured: bool
     reachable: bool
+    rest_reachable: bool = False
+    ui_reachable: bool = False
     base_url: Optional[str] = None
     message: str
+    rest_message: Optional[str] = None
+    ui_message: Optional[str] = None

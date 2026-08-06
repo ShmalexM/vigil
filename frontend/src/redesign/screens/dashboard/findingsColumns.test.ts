@@ -44,4 +44,9 @@ describe('adaptive findings columns', () => {
     // same five fields the old hardcoded search covered, in column order
     expect(base.filter((c) => c.searchVal).map((c) => c.key)).toEqual(['id', 'tech', 'src', 'host', 'user'])
   })
+
+  it('preserves resolved finding status for display', () => {
+    const resolved = mapApiFinding({ finding_id: 'WS3-1', status: 'resolved' } as never)
+    expect(resolved.status).toBe('resolved')
+  })
 })

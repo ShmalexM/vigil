@@ -10,8 +10,15 @@ import { mapApiFinding, type ApiFinding } from '../../data/mappers'
 import type { Finding } from '../../data/data'
 import type { Phase } from '../cases/useCases'
 import SourceChip from '../../shared/SourceChip'
+import { datasetFilterForScope, type DatasetScope } from './datasetScope'
 
-export default function AttackTechniqueFindings({ techniqueId }: { techniqueId: string }) {
+export default function AttackTechniqueFindings({
+  techniqueId,
+  datasetScope,
+}: {
+  techniqueId: string
+  datasetScope: DatasetScope
+}) {
   const [rows, setRows] = useState<Finding[]>([])
   const [phase, setPhase] = useState<Phase>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -21,7 +28,7 @@ export default function AttackTechniqueFindings({ techniqueId }: { techniqueId: 
     setPhase('loading')
     setError(null)
     attackApi
-      .getFindingsByTechnique(techniqueId)
+      .getFindingsByTechnique(techniqueId, datasetFilterForScope(datasetScope))
       .then((res) => {
         if (cancelled) return
         const list = (res.data?.findings || []) as ApiFinding[]
@@ -36,7 +43,7 @@ export default function AttackTechniqueFindings({ techniqueId }: { techniqueId: 
     return () => {
       cancelled = true
     }
-  }, [techniqueId])
+  }, [datasetScope, techniqueId])
 
   if (phase === 'loading') return <div className="tech-findings muted">Loading findings…</div>
   if (phase === 'error') return <div className="tech-findings muted">Couldn’t load findings: {error}</div>

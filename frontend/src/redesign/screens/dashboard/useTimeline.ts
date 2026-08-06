@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { timelineApi } from '../../../services/api'
 import type { TimelineEvent, TimelineKind } from './attackData'
 import type { Phase } from '../cases/useCases'
+import { datasetFilterForScope, type DatasetScope } from './datasetScope'
 
 interface RangeEvent {
   id: string
@@ -22,7 +23,7 @@ const sevOf = (s?: string): TimelineEvent['sev'] => {
 }
 const kindOf = (t?: string): TimelineKind => (t === 'case' ? 'case' : t === 'alert' ? 'alert' : 'finding')
 
-export function useTimeline() {
+export function useTimeline(datasetScope: DatasetScope) {
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [phase, setPhase] = useState<Phase>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -32,7 +33,7 @@ export function useTimeline() {
     setPhase('loading')
     setError(null)
     timelineApi
-      .getTimelineRange({ limit: 200 })
+      .getTimelineRange({ limit: 200, ...datasetFilterForScope(datasetScope) })
       .then((res) => {
         if (cancelled) return
         const list = (res.data?.events || []) as RangeEvent[]
@@ -57,7 +58,7 @@ export function useTimeline() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [datasetScope])
 
   return { events, phase, error }
 }

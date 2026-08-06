@@ -1,7 +1,7 @@
 """Cases API endpoints."""
 
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from datetime import datetime
 from pathlib import Path
@@ -516,7 +516,10 @@ async def delete_case(case_id: str):
 
 
 @router.get("/stats/summary")
-async def get_cases_summary():
+async def get_cases_summary(
+    dataset_id: Optional[str] = Query(None, description="Exact normalized finding dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Finding dataset ID to exclude"),
+):
     """
     Get summary statistics for cases.
     
@@ -524,6 +527,19 @@ async def get_cases_summary():
         Summary statistics
     """
     cases = data_service.get_cases()
+    if dataset_id is not None or exclude_dataset_id is not None:
+        finding_ids = {
+            finding["finding_id"]
+            for finding in data_service.get_findings(
+                dataset_id=dataset_id,
+                exclude_dataset_id=exclude_dataset_id,
+                include_embedding=False,
+            )
+        }
+        cases = [
+            case for case in cases
+            if finding_ids.intersection(case.get("finding_ids") or [])
+        ]
     
     # Calculate statistics
     status_counts = {}

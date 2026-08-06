@@ -13,6 +13,7 @@ from database.service import DatabaseService
 from core.exceptions import DatabaseError
 from core.config import is_demo_mode
 from core.config import vigil_path
+from services.finding_dataset import matches_dataset_filter, normalized_dataset_id
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,7 @@ class DatabaseDataService:
         severity: Optional[str] = None, data_source: Optional[str] = None,
         cluster_id: Optional[str] = None, min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None, search_query: Optional[str] = None,
+        dataset_id: Optional[str] = None, exclude_dataset_id: Optional[str] = None,
         sort_by: str = "timestamp", sort_order: str = "desc",
         include_embedding: bool = True,
     ) -> List[Dict]:
@@ -167,13 +169,20 @@ class DatabaseDataService:
             return [{k: v for k, v in f.items() if k != "embedding"} for f in items]
 
         if self._demo_mode and self._demo_service:
-            return _strip(self._demo_service.get_findings(limit))
+            findings = self._demo_service.get_findings(10000)
+            findings = [
+                finding for finding in findings
+                if matches_dataset_filter(finding, dataset_id, exclude_dataset_id)
+            ]
+            return _strip(findings[offset:offset + limit])
         if self._db_available:
             try:
                 findings = self._db_service.get_findings(
                     severity=severity, data_source=data_source,
                     cluster_id=cluster_id, min_anomaly_score=min_anomaly_score,
                     status=status, search_query=search_query,
+                    dataset_id=dataset_id,
+                    exclude_dataset_id=exclude_dataset_id,
                     limit=limit, offset=offset,
                     sort_by=sort_by, sort_order=sort_order,
                 )
@@ -193,6 +202,10 @@ class DatabaseDataService:
                 findings = [f for f in findings if f.get('anomaly_score', 0) >= min_anomaly_score]
             if status:
                 findings = [f for f in findings if f.get('status') == status]
+            findings = [
+                finding for finding in findings
+                if matches_dataset_filter(finding, dataset_id, exclude_dataset_id)
+            ]
             if search_query:
                 q = search_query.lower()
                 findings = [f for f in findings if (
@@ -224,15 +237,21 @@ class DatabaseDataService:
         self, severity: Optional[str] = None, data_source: Optional[str] = None,
         cluster_id: Optional[str] = None, min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None, search_query: Optional[str] = None,
+        dataset_id: Optional[str] = None, exclude_dataset_id: Optional[str] = None,
     ) -> int:
         if self._demo_mode and self._demo_service:
-            return len(self._demo_service.get_findings(10000))
+            return len([
+                finding for finding in self._demo_service.get_findings(10000)
+                if matches_dataset_filter(finding, dataset_id, exclude_dataset_id)
+            ])
         if self._db_available:
             try:
                 return self._db_service.count_findings(
                     severity=severity, data_source=data_source,
                     cluster_id=cluster_id, min_anomaly_score=min_anomaly_score,
                     status=status, search_query=search_query,
+                    dataset_id=dataset_id,
+                    exclude_dataset_id=exclude_dataset_id,
                 )
             except Exception as e:
                 logger.error(f"Error counting findings from DB: {e}")
@@ -249,6 +268,10 @@ class DatabaseDataService:
                 findings = [f for f in findings if f.get('anomaly_score', 0) >= min_anomaly_score]
             if status:
                 findings = [f for f in findings if f.get('status') == status]
+            findings = [
+                finding for finding in findings
+                if matches_dataset_filter(finding, dataset_id, exclude_dataset_id)
+            ]
             if search_query:
                 q = search_query.lower()
                 findings = [f for f in findings if (
@@ -258,6 +281,33 @@ class DatabaseDataService:
                 )]
             return len(findings)
         return 0
+
+    def get_finding_dataset_counts(self) -> List[Dict]:
+        """Return normalized dataset facets without requiring a schema migration."""
+        if self._db_available:
+            try:
+                return self._db_service.get_finding_dataset_counts()
+            except Exception as e:
+                logger.error(f"Error getting dataset facets from DB: {e}")
+                return []
+
+        if self._demo_mode and self._demo_service:
+            findings = self._demo_service.get_findings(10000)
+        elif self._use_json_fallback:
+            findings = self._load_findings_json()
+        else:
+            findings = []
+
+        counts: Dict[Optional[str], int] = {}
+        for finding in findings:
+            key = normalized_dataset_id(finding)
+            counts[key] = counts.get(key, 0) + 1
+        return [
+            {"dataset_id": dataset, "count": count}
+            for dataset, count in sorted(
+                counts.items(), key=lambda item: (item[0] is None, item[0] or "")
+            )
+        ]
     
     def get_finding(self, finding_id: str) -> Optional[Dict]:
         if self._demo_mode and self._demo_service:

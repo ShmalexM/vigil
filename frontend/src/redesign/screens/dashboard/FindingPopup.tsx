@@ -68,6 +68,14 @@ const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
+function predictionConfidence(finding: RawFinding, fallback: number): number {
+  const context = finding.entity_context
+  const value = context?.prediction_confidence ?? context?.confidence_score
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(value * 100)
+    : fallback
+}
+
 function EnrichmentView({ e }: { e: Enrichment }) {
   return (
     <>
@@ -324,7 +332,7 @@ export default function FindingPopup({
               <div className="fp-tactic">{f.tactic}</div>
             </div>
             <div className="fp-metrics">
-              <div className="fp-metric"><span className="fp-m-val">{f.conf}%</span><span className="fp-m-lab">confidence</span></div>
+              <div className="fp-metric"><span className="fp-m-val">{predictionConfidence(raw, f.conf)}%</span><span className="fp-m-lab">prediction confidence</span></div>
               <div className="fp-metric"><span className="fp-m-val">{f.score.toFixed(2)}</span><span className="fp-m-lab">anomaly</span></div>
             </div>
           </div>

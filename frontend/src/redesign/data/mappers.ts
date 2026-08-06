@@ -209,7 +209,8 @@ export function mapApiFinding(f: ApiFinding): Finding {
 /** backend finding statuses are new / investigating / resolved */
 function findingStatus(s?: string): Finding['status'] {
   if (s === 'investigating') return 'investigating'
-  if (s === 'resolved' || s === 'closed') return 'closed'
+  if (s === 'resolved') return 'resolved'
+  if (s === 'closed') return 'closed'
   return 'open' // new / open / anything else
 }
 

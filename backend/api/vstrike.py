@@ -297,18 +297,35 @@ async def health_check() -> VStrikeHealthResponse:
         return VStrikeHealthResponse(
             configured=False,
             reachable=False,
+            rest_reachable=False,
+            ui_reachable=False,
             base_url=None,
             message=(
-                "VStrike not configured. Set VSTRIKE_BASE_URL + VSTRIKE_API_KEY "
+                "VStrike not configured. Set VSTRIKE_BASE_URL, VSTRIKE_USERNAME, "
+                "and VSTRIKE_PASSWORD "
                 "or configure the integration in Settings."
             ),
         )
-    success, message = service.test_connection()
+    rest_reachable, rest_message = service.test_connection()
+    ui_reachable, ui_message = service.test_ui_connection()
+    reachable = rest_reachable or ui_reachable
+    if ui_reachable and not rest_reachable:
+        message = "VStrike UI is ready; legacy REST health is unavailable"
+    elif rest_reachable and not ui_reachable:
+        message = "VStrike REST is reachable; UI/MCP control plane is unavailable"
+    elif reachable:
+        message = "VStrike REST and UI/MCP control planes are reachable"
+    else:
+        message = "VStrike REST and UI/MCP control planes are unavailable"
     return VStrikeHealthResponse(
         configured=True,
-        reachable=success,
+        reachable=reachable,
+        rest_reachable=rest_reachable,
+        ui_reachable=ui_reachable,
         base_url=service.base_url,
         message=message,
+        rest_message=rest_message,
+        ui_message=ui_message,
     )
 
 

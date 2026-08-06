@@ -8,11 +8,12 @@ import { casesApi, findingsApi } from '../../../services/api'
 import { mapApiFinding, type ApiFinding } from '../../data/mappers'
 import type { Finding } from '../../data/data'
 import type { Phase } from '../cases/useCases'
+import { datasetFilterForScope, type DatasetScope } from './datasetScope'
 
 export type { Phase } from '../cases/useCases'
 
 /** list of all findings; polls in the background so new findings appear live */
-export function useFindings() {
+export function useFindings(datasetScope: DatasetScope) {
   const [rows, setRows] = useState<Finding[]>([])
   const [phase, setPhase] = useState<Phase>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +30,7 @@ export function useFindings() {
         setError(null)
       }
       findingsApi
-        .getAll({ limit: 1000 })
+        .getAll({ limit: 1000, ...datasetFilterForScope(datasetScope) })
         .then((res) => {
           if (cancelled) return
           const list = (res.data?.findings || []) as ApiFinding[]
@@ -50,7 +51,7 @@ export function useFindings() {
       cancelled = true
       clearInterval(id)
     }
-  }, [reloadKey])
+  }, [datasetScope, reloadKey])
 
   return { rows, phase, error, reload }
 }
@@ -76,7 +77,7 @@ interface CasesSummary {
 /** the KPI cards: aggregate findings + cases counts. Uses the summary endpoints
  *  (true totals, not the capped findings-list fetch) and polls every 10s so the
  *  numbers stay live alongside useFindings. */
-export function useDashboardKpis() {
+export function useDashboardKpis(datasetScope: DatasetScope) {
   const [kpis, setKpis] = useState<DashKpis | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
   const [reloadKey, setReloadKey] = useState(0)
@@ -88,7 +89,11 @@ export function useDashboardKpis() {
     // silent = background poll: refresh counts without flashing loading
     const fetchKpis = (silent: boolean) => {
       if (!silent) setPhase('loading')
-      Promise.all([findingsApi.getSummary(), casesApi.getSummary()])
+      const datasetFilter = datasetFilterForScope(datasetScope)
+      Promise.all([
+        findingsApi.getSummary(datasetFilter),
+        casesApi.getSummary(datasetFilter),
+      ])
         .then(([fRes, cRes]) => {
           if (cancelled) return
           const f = (fRes.data || {}) as FindingsSummary
@@ -115,7 +120,7 @@ export function useDashboardKpis() {
       cancelled = true
       clearInterval(id)
     }
-  }, [reloadKey])
+  }, [datasetScope, reloadKey])
 
   return { kpis, phase, reload }
 }

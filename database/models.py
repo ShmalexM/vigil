@@ -25,12 +25,29 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from pgvector.sqlalchemy import Vector
 import uuid
+
+try:
+    from pgvector.sqlalchemy import Vector
+except ModuleNotFoundError:  # Legacy deployments may still use float8[] embeddings.
+    Vector = None
 
 # Fixed width for the findings vector column; sources of other dimensions
 # (LogLM 512) are zero-padded/truncated to this before storage.
 EMBEDDING_DIM = 768
+EMBEDDING_COLUMN_TYPE = Vector(EMBEDDING_DIM) if Vector is not None else ARRAY(Float)
+EMBEDDING_INDEXES = (
+    (
+        Index(
+            "idx_finding_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+    if Vector is not None
+    else ()
+)
 
 
 class Base(DeclarativeBase):
@@ -67,7 +84,7 @@ class Finding(Base):
     # Primary key
     finding_id: Mapped[str] = mapped_column(String(50), primary_key=True)
 
-    embedding: Mapped[List[float]] = mapped_column(Vector(EMBEDDING_DIM), nullable=False)
+    embedding: Mapped[List[float]] = mapped_column(EMBEDDING_COLUMN_TYPE, nullable=False)
     mitre_predictions: Mapped[dict] = mapped_column(JSONB, nullable=False)
     anomaly_score: Mapped[float] = mapped_column(Float, nullable=False)
 
@@ -120,13 +137,6 @@ class Finding(Base):
         Index("idx_finding_data_source", "data_source"),
         Index("idx_finding_cluster_id", "cluster_id"),
         Index("idx_finding_anomaly_score", "anomaly_score"),
-        # HNSW ANN index for embedding cosine similarity (see find_similar_findings).
-        Index(
-            "idx_finding_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
         Index(
             "idx_finding_description",
             "description",
@@ -142,7 +152,7 @@ class Finding(Base):
                 "data_source IS NOT NULL AND external_id IS NOT NULL"
             ),
         ),
-    )
+    ) + EMBEDDING_INDEXES
 
     def to_dict(self, include_embedding: bool = True) -> dict:
         """Convert finding to dictionary. ``include_embedding=False`` omits the

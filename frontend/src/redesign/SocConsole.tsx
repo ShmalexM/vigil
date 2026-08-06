@@ -31,6 +31,8 @@ import AutoOpsScreen from './screens/autoops/AutoOpsScreen'
 import SettingsScreen from './screens/settings/SettingsScreen'
 import NotFoundScreen from './screens/notfound/NotFoundScreen'
 import { VigilMark, VigilLogo } from './shared/VigilLogo'
+import { VStrikeIframeProvider } from '../contexts/VStrikeIframeContext'
+import VStrikeIframeHost from './shell/VStrikeIframeHost'
 
 const SCREENS: Record<ScreenKey, (props: ScreenProps) => JSX.Element> = {
   dashboard: DashboardScreen,
@@ -96,9 +98,11 @@ export default function SocConsole() {
   // shell (which both styles .soc-console and renders the settings screen).
   return (
     <RedesignThemeProvider>
-      <ExtensionProvider>
-        <SocConsoleInner />
-      </ExtensionProvider>
+      <VStrikeIframeProvider>
+        <ExtensionProvider>
+          <SocConsoleInner />
+        </ExtensionProvider>
+      </VStrikeIframeProvider>
     </RedesignThemeProvider>
   )
 }
@@ -386,6 +390,7 @@ function SocConsoleInner() {
           <span>Ask Vigil</span>
         </button>
       )}
+      <VStrikeIframeHost />
       </ToastProvider>
     </div>
   )

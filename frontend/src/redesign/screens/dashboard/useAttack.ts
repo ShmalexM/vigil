@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { attackApi } from '../../../services/api'
 import { techniqueName, techniqueTactic } from '../../data/mitre'
 import type { Phase } from '../cases/useCases'
+import { datasetFilterForScope, type DatasetScope } from './datasetScope'
 
 export interface AttackTechnique {
   id: string
@@ -34,7 +35,11 @@ export interface AttackData {
   sevDist: [string, number, string][]
 }
 
-export function useAttack(minConfidence: number, timeRange: string) {
+export function useAttack(
+  minConfidence: number,
+  timeRange: string,
+  datasetScope: DatasetScope,
+) {
   const [data, setData] = useState<AttackData | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -49,7 +54,11 @@ export function useAttack(minConfidence: number, timeRange: string) {
     setPhase('loading')
     setError(null)
     attackApi
-      .getTechniqueRollup(minConfidence, range)
+      .getTechniqueRollup(
+        minConfidence,
+        range,
+        datasetFilterForScope(datasetScope),
+      )
       .then((res) => {
         if (cancelled) return
         const rows = (res.data?.techniques || []) as RollupRow[]
@@ -90,7 +99,7 @@ export function useAttack(minConfidence: number, timeRange: string) {
     return () => {
       cancelled = true
     }
-  }, [minConfidence, range, reloadKey])
+  }, [datasetScope, minConfidence, range, reloadKey])
 
   return { data, phase, error, reload }
 }

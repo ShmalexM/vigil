@@ -115,6 +115,24 @@ def test_test_connection_network_error():
     assert "Connection error" in msg
 
 
+def test_ui_connection_uses_the_mcp_network_list():
+    svc = _service()
+    with patch.object(svc, "list_networks", return_value=[{"id": "n-1"}]):
+        ok, msg = svc.test_ui_connection()
+
+    assert ok is True
+    assert "1 networks" in msg
+
+
+def test_ui_connection_reports_mcp_failures_separately():
+    svc = _service()
+    with patch.object(svc, "list_networks", side_effect=RuntimeError("MCP down")):
+        ok, msg = svc.test_ui_connection()
+
+    assert ok is False
+    assert "MCP down" in msg
+
+
 def test_get_asset_topology_returns_body_on_200():
     svc = _service()
     _seed_jwt(svc)
@@ -650,7 +668,7 @@ def test_storyline_list_unwraps_vstrike_structured_content():
     assert result == [{"storylineSetId": "ss1", "label": "Exfil"}]
 
 
-def test_storyline_events_get_passes_storyline_id():
+def test_storyline_events_get_passes_storyline_set_id():
     svc = _ui_service()
     _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
     body = {
@@ -671,7 +689,7 @@ def test_storyline_events_get_passes_storyline_id():
 
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "storyline-events-get"
-    assert payload["params"]["arguments"]["storylineId"] == "s1"
+    assert payload["params"]["arguments"] == {"storylineSetId": "s1"}
     assert result == [{"event_id": "e1", "timestamp": "t1"}]
 
 
@@ -783,12 +801,12 @@ def test_ui_camera_position_passes_position_and_rotation():
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "ui-camera-position"
     args = payload["params"]["arguments"]
-    assert args["position"] == {"x": 1.0, "y": 2.0, "z": 3.0}
-    assert args["rotation"] == {"pitch": 0.5, "yaw": 1.0}
+    assert args["position"] == [1.0, 2.0, 3.0]
+    assert args["rotation"] == [0.0, 0.5, 1.0]
     assert args["networkId"] == "net-1"
 
 
-def test_ui_storyline_apply_passes_storyline_id():
+def test_ui_storyline_apply_passes_storyline_set_id():
     svc = _ui_service()
     _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
     with patch(
@@ -799,7 +817,10 @@ def test_ui_storyline_apply_passes_storyline_id():
 
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "ui-storyline-apply"
-    assert payload["params"]["arguments"]["storylineId"] == "s1"
+    assert payload["params"]["arguments"] == {
+        "storylineSetId": "s1",
+        "networkId": "net-1",
+    }
 
 
 def test_ui_storyline_mode_passes_mode():
@@ -809,14 +830,14 @@ def test_ui_storyline_mode_passes_mode():
         "services.vstrike_service.requests.post",
         return_value=_mock_response(200, json_body={"result": {"ok": True}}),
     ) as mock_post:
-        svc.ui_storyline_mode("replay", network_id="net-1")
+        svc.ui_storyline_mode("5 minute", network_id="net-1")
 
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "ui-storyline-mode"
-    assert payload["params"]["arguments"]["mode"] == "replay"
+    assert payload["params"]["arguments"] == {"mode": "5 minute"}
 
 
-def test_ui_storyline_forward_passes_network_id():
+def test_ui_storyline_forward_uses_empty_live_schema():
     svc = _ui_service()
     _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
     with patch(
@@ -827,10 +848,10 @@ def test_ui_storyline_forward_passes_network_id():
 
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "ui-storyline-forward"
-    assert payload["params"]["arguments"]["networkId"] == "net-1"
+    assert payload["params"]["arguments"] == {}
 
 
-def test_ui_storyline_backward_passes_network_id():
+def test_ui_storyline_backward_uses_empty_live_schema():
     svc = _ui_service()
     _jwt_cache[(svc.base_url, svc.username)] = ("jwt-A", 9_999_999_999.0)
     with patch(
@@ -841,7 +862,7 @@ def test_ui_storyline_backward_passes_network_id():
 
     payload = mock_post.call_args.kwargs["json"]
     assert payload["params"]["name"] == "ui-storyline-backward"
-    assert payload["params"]["arguments"]["networkId"] == "net-1"
+    assert payload["params"]["arguments"] == {}
 
 
 # ---------------------------------------------------------------------------

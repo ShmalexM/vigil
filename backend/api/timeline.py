@@ -241,6 +241,8 @@ async def get_timeline_range(
     end: Optional[str] = Query(None, description="End time (ISO format)"),
     severity: Optional[str] = Query(None, description="Filter by severity"),
     data_source: Optional[str] = Query(None, description="Filter by data source"),
+    dataset_id: Optional[str] = Query(None, description="Exact normalized dataset ID"),
+    exclude_dataset_id: Optional[str] = Query(None, description="Dataset ID to exclude"),
     limit: int = Query(default=500, ge=1, le=5000)
 ):
     """
@@ -264,7 +266,13 @@ async def get_timeline_range(
         end_time = normalize_timestamp(end) if end else None
         
         # Get findings
-        all_findings = data_service.get_findings(limit=limit)
+        all_findings = data_service.get_findings(
+            limit=limit,
+            severity=severity,
+            data_source=data_source,
+            dataset_id=dataset_id,
+            exclude_dataset_id=exclude_dataset_id,
+        )
         
         events: List[TimelineEvent] = []
         
@@ -584,4 +592,3 @@ async def get_event_visualization(
     except Exception as e:
         logger.error(f"Error getting event visualization: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
