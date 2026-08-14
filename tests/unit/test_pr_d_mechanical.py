@@ -241,3 +241,87 @@ class TestDaemonDefaultThinkingBudget:
         from daemon.agent_runner import _default_thinking_budget
 
         assert _default_thinking_budget() == 10000
+
+
+# ---------------------------------------------------------------------------
+# 6. Finding tool payload compaction
+# ---------------------------------------------------------------------------
+
+
+class TestFindingToolPayloadCompaction:
+    def test_preserves_evidence_metadata_and_omits_raw_stream_rows(self):
+        from services.tool_manager import _compact_finding_evidence_for_llm
+
+        original = {
+            "finding_id": "f-demo",
+            "embedding": [0.1, 0.2],
+            "entity_context": {
+                "source_evidence": {
+                    "status": "available",
+                    "summary": "51 exact flow and Modbus records",
+                    "coverage": {"flow_count": 51},
+                    "streams": {
+                        "netflow": {
+                            "schema_id": "netflow.v1",
+                            "total_records": 51,
+                            "truncated": False,
+                            "records": [{"id": 1}, {"id": 2}, {"id": 3}],
+                        }
+                    },
+                }
+            },
+        }
+
+        compact = _compact_finding_evidence_for_llm(original)
+
+        assert "embedding" not in compact
+        evidence = compact["entity_context"]["source_evidence"]
+        assert (
+            evidence["summary"]
+            == original["entity_context"]["source_evidence"]["summary"]
+        )
+        assert evidence["coverage"] == {"flow_count": 51}
+        stream = evidence["streams"]["netflow"]
+        assert stream == {
+            "schema_id": "netflow.v1",
+            "total_records": 51,
+            "truncated": False,
+        }
+        original_records = original["entity_context"]["source_evidence"]["streams"][
+            "netflow"
+        ]["records"]
+        assert len(original_records) == 3
+
+    def test_unknown_source_label_hides_evaluation_only_labels(self):
+        from services.tool_manager import _execute_findings_case_tool
+
+        class DataService:
+            def get_finding(self, **kwargs):
+                assert kwargs == {"finding_id": "f-demo"}
+                return {
+                    "finding_id": "f-demo",
+                    "evaluation_result": "false_positive",
+                    "ground_truth_malicious": False,
+                    "entity_context": {
+                        "malicious": False,
+                        "evaluation_result": "false_positive",
+                        "ground_truth_malicious": False,
+                        "verdict": "attack",
+                    },
+                }
+
+        finding, handled = _execute_findings_case_tool(
+            DataService(),
+            "get_finding",
+            {"finding_id": "f-demo", "_source_label_unknown": True},
+        )
+
+        assert handled is True
+        assert "evaluation_result" not in finding
+        assert "ground_truth_malicious" not in finding
+        assert finding["source_label"] == "Unknown"
+        assert "do not infer" in finding["label_note"]
+        assert "malicious" not in finding["entity_context"]
+        assert "evaluation_result" not in finding["entity_context"]
+        assert "ground_truth_malicious" not in finding["entity_context"]
+        assert finding["entity_context"]["verdict"] == "attack"

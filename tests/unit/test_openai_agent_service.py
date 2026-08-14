@@ -211,6 +211,32 @@ async def test_tool_call_executes_then_finishes(provider):
 
 
 @pytest.mark.asyncio
+async def test_seeded_tool_call_executes_before_single_model_turn(provider):
+    responses = [[_chunk(content="done", finish_reason="stop")]]
+    agent = _agent()
+    agent._execute_tool = AsyncMock(return_value=("FINDING", False))
+
+    events = []
+    with patch("openai.AsyncOpenAI", _fake_openai_factory(responses)):
+        async for event in agent.stream(
+            provider=provider,
+            messages=[{"role": "user", "content": "investigate finding f-demo"}],
+            initial_tool_call={
+                "name": "mytool",
+                "arguments": {"finding_id": "f-demo"},
+            },
+        ):
+            events.append(event)
+
+    assert events[0]["type"] == "tool_processing"
+    assert events[1]["type"] == "tool_result"
+    assert any(e["type"] == "text" and e["content"] == "done" for e in events)
+    agent._execute_tool.assert_awaited_once_with(
+        "mytool", '{"finding_id":"f-demo"}'
+    )
+
+
+@pytest.mark.asyncio
 async def test_tool_error_flag_propagates(provider):
     responses = [
         [

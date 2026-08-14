@@ -347,6 +347,42 @@ def _compact_finding(f: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _compact_finding_evidence_for_llm(finding: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep evidence provenance/counts while omitting bulky raw stream rows."""
+    compact = dict(finding)
+    compact.pop("embedding", None)
+
+    entity_context = compact.get("entity_context")
+    if not isinstance(entity_context, dict):
+        return compact
+
+    entity_context = dict(entity_context)
+    source_evidence = entity_context.get("source_evidence")
+    if not isinstance(source_evidence, dict):
+        compact["entity_context"] = entity_context
+        return compact
+
+    source_evidence = dict(source_evidence)
+    streams = source_evidence.get("streams")
+    if isinstance(streams, dict):
+        compact_streams: Dict[str, Any] = {}
+        for name, stream in streams.items():
+            if not isinstance(stream, dict):
+                compact_streams[name] = stream
+                continue
+            compact_stream = {
+                key: stream[key]
+                for key in ("schema_id", "total_records", "truncated")
+                if key in stream
+            }
+            compact_streams[name] = compact_stream
+        source_evidence["streams"] = compact_streams
+
+    entity_context["source_evidence"] = source_evidence
+    compact["entity_context"] = entity_context
+    return compact
+
+
 def _execute_findings_case_tool(
     data_service: Any, tool_name: str, args: Dict[str, Any]
 ) -> Tuple[Any, bool]:
@@ -428,7 +464,34 @@ def _execute_findings_case_tool(
         }, True
 
     if tool_name == "get_finding":
-        return data_service.get_finding(**args), True
+        lookup_args = dict(args)
+        source_label_unknown = bool(
+            lookup_args.pop("_source_label_unknown", False)
+        )
+        finding = data_service.get_finding(**lookup_args)
+        if isinstance(finding, dict):
+            # Preserve the complete stored finding for APIs/evidence tabs, but
+            # keep the LLM follow-up bounded. Raw streams remain represented by
+            # exact counts, provenance, hashes, and coverage metadata.
+            finding = _compact_finding_evidence_for_llm(finding)
+            if source_label_unknown:
+                finding.pop("evaluation_result", None)
+                finding.pop("ground_truth_malicious", None)
+                finding["source_label"] = "Unknown"
+                finding["label_note"] = (
+                    "No source ground-truth label is available; do not infer one."
+                )
+                entity_context = finding.get("entity_context")
+                if isinstance(entity_context, dict):
+                    entity_context = dict(entity_context)
+                    for key in (
+                        "malicious",
+                        "evaluation_result",
+                        "ground_truth_malicious",
+                    ):
+                        entity_context.pop(key, None)
+                    finding["entity_context"] = entity_context
+        return finding, True
 
     if tool_name == "nearest_neighbors":
         return data_service.get_nearest_neighbors(**args), True

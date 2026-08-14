@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import base64
+import re
 
 from backend.middleware.auth import get_current_user
 from backend.schemas.system_prompt import validate_system_prompt
@@ -24,6 +25,7 @@ from services.claude_service import ClaudeService
 from services.defaults import DEFAULT_MODEL
 from services.model_registry import get_registry
 from api._meta import Auth, RouterMeta
+from core.config import get_settings
 from core.rate_limit import rate_limit_dependency
 
 router = APIRouter()
@@ -212,6 +214,68 @@ ROUTER_AGENT_TOOLS_SYSTEM_PROMPT = (
     "context or tool results, say so. Never fabricate data, code, or "
     "detection content."
 )
+
+ROUTER_FAST_DEMO_SYSTEM_PROMPT = (
+    "Fast demo mode is active. For a prompt that names one finding ID, call "
+    "get_finding exactly once, then answer from that result and the supplied "
+    "source facts. Do not search broadly or create/update cases unless the "
+    "user explicitly asks. Use only three headings: Source facts (up to three "
+    "bullets), Generated assessment (one cautious sentence), and Next step "
+    "(one sentence). Stay under 100 words. Do not treat malicious/evaluation "
+    "metadata as ground truth when source_label is unknown. Do not invent "
+    "register anomalies, threat-intel matches, correlations, or attribution. "
+    "Protocol-count key 6 means TCP, never port 6. The next step must request "
+    "analyst validation; never recommend closing or suppressing automatically."
+)
+
+_DEMO_FINDING_PROMPT_RE = re.compile(
+    r"^\s*investigate\s+finding\s+(f-[a-z0-9-]+)\b", re.IGNORECASE
+)
+
+
+def _demo_finding_id(prompt: str) -> Optional[str]:
+    """Extract only the seeded single-finding demo prompt shape."""
+    match = _DEMO_FINDING_PROMPT_RE.search(prompt or "")
+    return match.group(1) if match else None
+
+
+def _fast_demo_enabled() -> bool:
+    """Enable bounded demo tuning only for named DEV_MODE profiles.
+
+    This keeps the WS3/VC local processes fast without changing production or
+    TAC routing.  An explicit VIGIL_FAST_DEMO=false disables the inference.
+    """
+    settings = get_settings()
+    if not settings.dev_mode:
+        return False
+    if settings.vigil_fast_demo is not None:
+        return settings.vigil_fast_demo
+    return bool(settings.vigil_demo_profile.strip())
+
+
+async def _prewarm_demo_ollama(provider, model: str) -> None:
+    """Load and retain the local model before the Bifrost completion.
+
+    Ollama's OpenAI-compatible endpoint does not forward keep_alive, while the
+    native zero-token generate request does.  This is best-effort housekeeping;
+    inference still goes through Bifrost for logging and routing.
+    """
+    settings = get_settings()
+    keep_alive = settings.vigil_demo_ollama_keep_alive.strip()
+    if not keep_alive or getattr(provider, "provider_type", None) != "ollama":
+        return
+    base_url = (getattr(provider, "base_url", None) or settings.ollama_url).rstrip("/")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                f"{base_url}/api/generate",
+                json={"model": model, "stream": False, "keep_alive": keep_alive},
+            )
+            response.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Demo Ollama prewarm failed for %s: %s", model, exc)
 
 
 def _select_active_provider(provider_id: Optional[str]):
@@ -414,6 +478,18 @@ async def chat(request: ChatRequest):
         active_provider is not None
         and getattr(active_provider, "provider_type", None) != "anthropic"
     )
+    fast_demo = (
+        use_router
+        and active_provider is not None
+        and getattr(active_provider, "provider_type", None) == "ollama"
+        and _fast_demo_enabled()
+    )
+    if fast_demo:
+        # Existing browser localStorage can retain a 4K/16K max-token choice.
+        # Enforce the demo cap server-side and make the UI's default-off
+        # thinking setting effective on the Ollama path.
+        max_tokens = min(max_tokens, get_settings().vigil_demo_max_tokens)
+        enable_thinking = False
 
     claude_service = None
     if not use_router:
@@ -738,6 +814,15 @@ async def chat_stream(
         active_provider is not None
         and getattr(active_provider, "provider_type", None) != "anthropic"
     )
+    fast_demo = (
+        use_router
+        and active_provider is not None
+        and getattr(active_provider, "provider_type", None) == "ollama"
+        and _fast_demo_enabled()
+    )
+    if fast_demo:
+        max_tokens = min(max_tokens, get_settings().vigil_demo_max_tokens)
+        enable_thinking = False
 
     claude_service = None
     if not use_router:
@@ -844,6 +929,8 @@ async def chat_stream(
                 # anything else falls back to a plain no-tools router stream.
                 # Both branches preserve history tracking below.
                 model_id = request.model or active_provider.default_model
+                if fast_demo:
+                    await _prewarm_demo_ollama(active_provider, model_id)
                 enable_agent_tools = False
                 try:
                     from services.model_registry import ModelRegistry
@@ -860,10 +947,38 @@ async def chat_stream(
                     logger.debug("model tool-support lookup failed: %s", exc)
 
                 agent = None
+                initial_tool_call = None
                 if enable_agent_tools:
                     from services.openai_agent_service import OpenAIAgentService
 
-                    agent = OpenAIAgentService(recommended_tools=recommended_tools)
+                    agent_tools = recommended_tools
+                    demo_finding_id = (
+                        _demo_finding_id(history_user_text) if fast_demo else None
+                    )
+                    if demo_finding_id:
+                        # The seeded prompt already identifies the target.  A
+                        # broad list_findings/rollup round bloats the follow-up
+                        # context and can tempt the Correlator to create a case.
+                        agent_tools = ["get_finding"]
+                        initial_tool_call = {
+                            "name": "get_finding",
+                            "arguments": {
+                                "finding_id": demo_finding_id,
+                                "_source_label_unknown": (
+                                    "source label: unknown"
+                                    in history_user_text.lower()
+                                ),
+                            },
+                        }
+                    agent = OpenAIAgentService(
+                        recommended_tools=agent_tools,
+                        include_mcp_tools=not fast_demo,
+                        max_tool_iterations=2 if fast_demo else 30,
+                        max_processing_time_s=30.0 if fast_demo else 300.0,
+                        llm_turn_timeout_s=15.0 if fast_demo else None,
+                        tool_timeout_s=5.0 if fast_demo else 30.0,
+                        inter_iteration_delay_s=0.0 if fast_demo else None,
+                    )
                     # Claims tool support but nothing loadable — fall back to the
                     # no-tools stream rather than send an empty tools=[] that some
                     # providers reject.
@@ -893,6 +1008,11 @@ async def chat_stream(
                         if system_prompt
                         else ROUTER_AGENT_TOOLS_SYSTEM_PROMPT
                     )
+                    if fast_demo:
+                        agent_system_prompt = (
+                            f"{ROUTER_FAST_DEMO_SYSTEM_PROMPT}\n\n"
+                            f"{agent_system_prompt}"
+                        )
                     async for chunk in agent.stream(
                         provider=active_provider,
                         messages=messages,
@@ -900,6 +1020,8 @@ async def chat_stream(
                         model=model_id,
                         max_tokens=max_tokens,
                         enable_tools=True,
+                        enable_thinking=enable_thinking,
+                        initial_tool_call=initial_tool_call,
                         session_id=request.session_id,
                         agent_id=request.agent_id,
                     ):
@@ -917,6 +1039,7 @@ async def chat_stream(
                         model=model_id,
                         max_tokens=max_tokens,
                         interaction_id=request_id,
+                        enable_thinking=enable_thinking,
                     ):
                         text_chunks += 1
                         total_text_length += len(chunk.get("content", ""))

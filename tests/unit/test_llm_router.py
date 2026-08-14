@@ -917,10 +917,33 @@ async def test_dispatch_openai_stream_yields_text_and_skips_empty():
     assert oai_ctor.call_args.kwargs["base_url"] == "http://test-bifrost:8080/v1"
     kwargs = mock_client.chat.completions.create.call_args.kwargs
     assert kwargs["stream"] is True
+    assert kwargs["reasoning_effort"] == "none"
     # model is provider-prefixed so Bifrost routes to the right backend
     assert kwargs["model"] == "ollama/llama3.1:8b"
     assert kwargs["messages"][0] == {"role": "system", "content": "be terse"}
     # client is closed on normal completion (no httpx pool leak)
+    mock_client.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_ollama_thinking_opt_in_does_not_force_none():
+    router = LLMRouter(bifrost_url="http://test-bifrost:8080")
+    mock_client = MagicMock()
+    mock_client.close = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_achunks([]))
+
+    with patch("openai.AsyncOpenAI", return_value=mock_client):
+        _ = [
+            c
+            async for c in router.stream_openai_raw(
+                provider=_ollama_spec(),
+                messages=[{"role": "user", "content": "hi"}],
+                enable_thinking=True,
+            )
+        ]
+
+    kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert "reasoning_effort" not in kwargs
     mock_client.close.assert_awaited_once()
 
 

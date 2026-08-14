@@ -57,6 +57,15 @@ class Settings(BaseSettings):
     environment: str = "development"
     release_version: str = "unknown"
     demo_mode: Optional[bool] = None
+    # Named demo profiles run in an isolated DEV_MODE process.  ``None`` for
+    # vigil_fast_demo means "enable the bounded fast path when a profile is
+    # present"; deployments can explicitly set false to retain full agent
+    # depth.  Production never infers fast-demo mode from the profile alone.
+    vigil_demo_profile: str = ""
+    vigil_demo_variant: str = ""
+    vigil_fast_demo: Optional[bool] = None
+    vigil_demo_max_tokens: int = 384
+    vigil_demo_ollama_keep_alive: str = "30m"
     data_backend: str = "database"
     autostart_services: Optional[str] = None
     max_upload_size_mb: int = 500
@@ -245,6 +254,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "demo_mode",
+        "vigil_fast_demo",
         "mempalace_daemon_enabled",
         "daemon_slack_enabled",
         "mcp_auto_connect_on_startup",

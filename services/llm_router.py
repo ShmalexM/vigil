@@ -334,6 +334,7 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 tools=tools,
+                enable_thinking=enable_thinking,
                 extra_headers=extra_headers_or_none,
             )
         )
@@ -350,6 +351,7 @@ class LLMRouter:
         max_tokens: int,
         temperature: Optional[float],
         tools: Optional[List[Dict[str, Any]]],
+        enable_thinking: bool = False,
         extra_headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         from openai import AsyncOpenAI  # lazy — avoids hard dep for tests
@@ -382,6 +384,14 @@ class LLMRouter:
             kwargs["temperature"] = temperature
         if tools:
             kwargs["tools"] = anthropic_tools_to_openai(tools)
+        # Ollama's OpenAI-compatible endpoint enables Qwen reasoning by
+        # default.  The chat UI's enable_thinking flag previously stopped at
+        # this router boundary, so a nominally non-thinking request still
+        # spent hundreds of hidden tokens before every tool turn.  Bifrost
+        # forwards the standard reasoning_effort field to Ollama; "none" is
+        # the supported fast path and leaves other provider types unchanged.
+        if provider.provider_type == "ollama" and not enable_thinking:
+            kwargs["reasoning_effort"] = "none"
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
 
@@ -436,6 +446,7 @@ class LLMRouter:
         tools: Optional[List[Dict[str, Any]]] = None,
         interaction_id: Optional[str] = None,
         include_usage: bool = False,
+        enable_thinking: bool = False,
     ):
         """Yield raw OpenAI stream chunks (tool-call deltas, finish_reason,
         usage) for non-Anthropic Bifrost providers."""
@@ -470,6 +481,8 @@ class LLMRouter:
             kwargs["temperature"] = temperature
         if tools:
             kwargs["tools"] = anthropic_tools_to_openai(tools)
+        if provider.provider_type == "ollama" and not enable_thinking:
+            kwargs["reasoning_effort"] = "none"
         extra_headers = _bifrost_headers(interaction_id)
         if extra_headers:
             kwargs["extra_headers"] = extra_headers
@@ -498,6 +511,7 @@ class LLMRouter:
         temperature: Optional[float] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         interaction_id: Optional[str] = None,
+        enable_thinking: bool = False,
     ):
         """Yield OpenAI-format text chunks for non-Anthropic Bifrost providers."""
         async for chunk in self.stream_openai_raw(
@@ -509,6 +523,7 @@ class LLMRouter:
             temperature=temperature,
             tools=tools,
             interaction_id=interaction_id,
+            enable_thinking=enable_thinking,
         ):
             if not chunk.choices:
                 continue

@@ -88,11 +88,29 @@ class OpenAIAgentService:
         backend_tools: Optional[List[Dict[str, Any]]] = None,
         include_mcp_tools: bool = True,
         recommended_tools: Optional[List[str]] = None,
+        max_tool_iterations: int = _MAX_TOOL_ITERATIONS,
+        max_processing_time_s: float = _MAX_PROCESSING_TIME_S,
+        llm_turn_timeout_s: Optional[float] = None,
+        tool_timeout_s: float = _TOOL_TIMEOUT_S,
+        inter_iteration_delay_s: Optional[float] = None,
     ):
         self._backend_tools = backend_tools or self._load_backend_tools()
         self._include_mcp_tools = include_mcp_tools
         self._recommended_tools = recommended_tools
         self._backend_tool_names: Set[str] = {t["name"] for t in self._backend_tools}
+        self._max_tool_iterations = max(1, int(max_tool_iterations))
+        self._max_processing_time_s = max(1.0, float(max_processing_time_s))
+        self._llm_turn_timeout_s = (
+            None
+            if llm_turn_timeout_s is None
+            else max(1.0, float(llm_turn_timeout_s))
+        )
+        self._tool_timeout_s = max(0.1, float(tool_timeout_s))
+        self._inter_iteration_delay_s = (
+            None
+            if inter_iteration_delay_s is None
+            else max(0.0, float(inter_iteration_delay_s))
+        )
         # Attribution context for approval requests; set per-run in stream().
         self._session_id: Optional[str] = None
         self._agent_id: Optional[str] = None
@@ -172,6 +190,8 @@ class OpenAIAgentService:
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         enable_tools: bool = True,
+        enable_thinking: bool = False,
+        initial_tool_call: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         history_window: int = _HISTORY_WINDOW_DEFAULT,
@@ -187,8 +207,8 @@ class OpenAIAgentService:
             {"type": "error", "content": "..."}
 
         Matches ClaudeService.chat_stream guardrails:
-            - 30 tool iterations max
-            - 300s wall-clock timeout
+            - bounded tool iterations and wall-clock time
+            - optional per-LLM-turn and per-tool timeouts
             - Exponential inter-iteration backoff
             - Infinite loop detection (3 repeated identical tool sets)
         """
@@ -209,26 +229,97 @@ class OpenAIAgentService:
         oai_messages = anthropic_messages_to_openai(messages)
         oai_messages = self._apply_history_window(oai_messages, history_window)
 
+        if initial_tool_call and enable_tools:
+            tool_name = str(initial_tool_call.get("name") or "").strip()
+            tool_args = initial_tool_call.get("arguments") or {}
+            exposed_names = {
+                tool["function"]["name"]
+                for tool in tools
+                if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+            }
+            if tool_name not in exposed_names or not isinstance(tool_args, dict):
+                yield {
+                    "type": "error",
+                    "content": "Invalid initial tool call for this agent.",
+                }
+                return
+
+            tool_call_id = f"call_seed_{uuid.uuid4().hex[:12]}"
+            raw_args = json.dumps(tool_args, separators=(",", ":"))
+            yield {
+                "type": "tool_processing",
+                "tool_name": tool_name,
+                "tool_id": tool_call_id,
+            }
+            try:
+                result_text, is_error = await asyncio.wait_for(
+                    self._execute_tool(tool_name, raw_args),
+                    timeout=self._tool_timeout_s,
+                )
+            except (PendingApprovalError, TimeoutError) as exc:
+                yield {"type": "error", "content": str(exc)}
+                return
+
+            preview = result_text[:500] + ("…" if len(result_text) > 500 else "")
+            yield {
+                "type": "tool_result",
+                "tool_name": tool_name,
+                "tool_id": tool_call_id,
+                "result": preview,
+                "is_error": is_error,
+            }
+            oai_messages.extend(
+                [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": tool_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": raw_args,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": (
+                            f"ERROR: {result_text}" if is_error else result_text
+                        ),
+                    },
+                ]
+            )
+            # The seeded demo lookup is the complete evidence-gathering step;
+            # the remaining single model turn only needs to synthesize it.
+            tools = []
+
         start_time = asyncio.get_event_loop().time()
 
         # Infinite loop detection state
         tool_call_history: deque = deque(maxlen=_LOOP_DETECT_WINDOW)
 
-        for iteration in range(_MAX_TOOL_ITERATIONS):
+        for iteration in range(self._max_tool_iterations):
             elapsed = asyncio.get_event_loop().time() - start_time
-            if elapsed > _MAX_PROCESSING_TIME_S:
+            if elapsed > self._max_processing_time_s:
                 yield {
                     "type": "text",
                     "content": (
                         "\n\n[Maximum processing time "
-                        f"({_MAX_PROCESSING_TIME_S:.0f}s) exceeded "
+                        f"({self._max_processing_time_s:.0f}s) exceeded "
                         f"after {iteration} iterations.]"
                     ),
                 }
                 break
 
             if iteration > 0:
-                delay = _inter_iteration_delay(iteration)
+                delay = (
+                    _inter_iteration_delay(iteration)
+                    if self._inter_iteration_delay_s is None
+                    else self._inter_iteration_delay_s
+                )
                 await asyncio.sleep(delay)
 
             interaction_id = str(uuid.uuid4())
@@ -242,53 +333,74 @@ class OpenAIAgentService:
             iter_start = time.monotonic()
 
             try:
-                async for chunk in router.stream_openai_raw(
-                    provider=provider,
-                    messages=oai_messages,
-                    system_prompt=system_prompt,
-                    model=model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    tools=tools or None,
-                    interaction_id=interaction_id,
-                    # Ask for a final usage-only chunk so token counts (and thus
-                    # cost) are recorded — without this, streamed responses carry
-                    # no usage and analytics would show $0 for OpenAI/Groq/Ollama.
-                    include_usage=True,
-                ):
-                    # The usage-only chunk (include_usage) arrives with an
-                    # empty ``choices`` list, so read usage before skipping it.
-                    usage = getattr(chunk, "usage", None)
-                    if usage:
-                        input_tokens = getattr(usage, "prompt_tokens", 0) or 0
-                        output_tokens = getattr(usage, "completion_tokens", 0) or 0
-                    if not chunk.choices:
-                        continue
-                    choice = chunk.choices[0]
-                    delta = choice.delta
-                    finish_reason = choice.finish_reason or finish_reason
+                # asyncio.timeout(None) is an explicit no-timeout context, so
+                # the production default remains unchanged while demo callers
+                # can prevent a single silent model turn from occupying the UI
+                # for minutes.
+                async with asyncio.timeout(self._llm_turn_timeout_s):
+                    async for chunk in router.stream_openai_raw(
+                        provider=provider,
+                        messages=oai_messages,
+                        system_prompt=system_prompt,
+                        model=model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        tools=tools or None,
+                        interaction_id=interaction_id,
+                        # Ask for a final usage-only chunk so token counts (and thus
+                        # cost) are recorded — without this, streamed responses carry
+                        # no usage and analytics would show $0 for OpenAI/Groq/Ollama.
+                        include_usage=True,
+                        enable_thinking=enable_thinking,
+                    ):
+                        # The usage-only chunk (include_usage) arrives with an
+                        # empty ``choices`` list, so read usage before skipping it.
+                        usage = getattr(chunk, "usage", None)
+                        if usage:
+                            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                        if not chunk.choices:
+                            continue
+                        choice = chunk.choices[0]
+                        delta = choice.delta
+                        finish_reason = choice.finish_reason or finish_reason
 
-                    if delta and delta.content:
-                        text_buffer += delta.content
-                        yield {"type": "text", "content": delta.content}
+                        if delta and delta.content:
+                            text_buffer += delta.content
+                            yield {"type": "text", "content": delta.content}
 
-                    if delta and delta.tool_calls:
-                        for tc_delta in delta.tool_calls:
-                            idx = tc_delta.index
-                            if idx not in tool_calls_buffer:
-                                tool_calls_buffer[idx] = {
-                                    "id": tc_delta.id or "",
-                                    "name": "",
-                                    "arguments": "",
-                                }
-                            entry = tool_calls_buffer[idx]
-                            if tc_delta.id:
-                                entry["id"] = tc_delta.id
-                            if tc_delta.function:
-                                if tc_delta.function.name:
-                                    entry["name"] += tc_delta.function.name
-                                if tc_delta.function.arguments:
-                                    entry["arguments"] += tc_delta.function.arguments
+                        if delta and delta.tool_calls:
+                            for tc_delta in delta.tool_calls:
+                                idx = tc_delta.index
+                                if idx not in tool_calls_buffer:
+                                    tool_calls_buffer[idx] = {
+                                        "id": tc_delta.id or "",
+                                        "name": "",
+                                        "arguments": "",
+                                    }
+                                entry = tool_calls_buffer[idx]
+                                if tc_delta.id:
+                                    entry["id"] = tc_delta.id
+                                if tc_delta.function:
+                                    if tc_delta.function.name:
+                                        entry["name"] += tc_delta.function.name
+                                    if tc_delta.function.arguments:
+                                        entry["arguments"] += tc_delta.function.arguments
+
+            except TimeoutError:
+                logger.warning(
+                    "OpenAI stream iteration %d exceeded %.1fs",
+                    iteration,
+                    self._llm_turn_timeout_s,
+                )
+                yield {
+                    "type": "error",
+                    "content": (
+                        "Local model turn timed out after "
+                        f"{self._llm_turn_timeout_s:.0f}s."
+                    ),
+                }
+                break
 
             except Exception as exc:
                 logger.error("OpenAI stream error iteration %d: %s", iteration, exc)
@@ -418,8 +530,9 @@ class OpenAIAgentService:
                 }
 
                 try:
-                    result_text, is_error = await self._execute_tool(
-                        tool_name, raw_args
+                    result_text, is_error = await asyncio.wait_for(
+                        self._execute_tool(tool_name, raw_args),
+                        timeout=self._tool_timeout_s,
                     )
                 except PendingApprovalError as exc:
                     # Hold the run here until an operator decides, so a run
@@ -441,8 +554,9 @@ class OpenAIAgentService:
                     # Human think-time isn't LLM processing time.
                     start_time += waited
                     if decision == "approved":
-                        result_text, is_error = await self._execute_tool(
-                            tool_name, raw_args, approved=True
+                        result_text, is_error = await asyncio.wait_for(
+                            self._execute_tool(tool_name, raw_args, approved=True),
+                            timeout=self._tool_timeout_s,
                         )
                         self._mark_action_executed(exc.action_id, result_text, is_error)
                     elif decision == "rejected":
@@ -456,6 +570,13 @@ class OpenAIAgentService:
                         yield {"type": "error", "content": detail}
                         halt = True
                         break
+
+                except TimeoutError:
+                    result_text, is_error = (
+                        f"Tool '{tool_name}' timed out after "
+                        f"{self._tool_timeout_s:.0f}s.",
+                        True,
+                    )
 
                 preview = result_text[:500] + ("…" if len(result_text) > 500 else "")
                 yield {
@@ -484,7 +605,7 @@ class OpenAIAgentService:
             yield {
                 "type": "text",
                 "content": (
-                    f"\n\n[Tool iteration limit ({_MAX_TOOL_ITERATIONS}) "
+                    f"\n\n[Tool iteration limit ({self._max_tool_iterations}) "
                     "reached. Stopping.]"
                 ),
             }
@@ -499,6 +620,7 @@ class OpenAIAgentService:
         max_tokens: int = 4096,
         temperature: Optional[float] = None,
         enable_tools: bool = True,
+        enable_thinking: bool = False,
         session_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         history_window: int = _HISTORY_WINDOW_DEFAULT,
@@ -520,6 +642,7 @@ class OpenAIAgentService:
             max_tokens=max_tokens,
             temperature=temperature,
             enable_tools=enable_tools,
+            enable_thinking=enable_thinking,
             session_id=session_id,
             agent_id=agent_id,
             history_window=history_window,
@@ -729,7 +852,7 @@ class OpenAIAgentService:
                 server_name,
                 actual_tool,
                 arguments,
-                timeout=_TOOL_TIMEOUT_S,
+                timeout=self._tool_timeout_s,
             )
 
             if isinstance(result, dict):

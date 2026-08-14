@@ -258,6 +258,7 @@ export default function Chat({
   // true between a `tool_processing` event and the next `text` chunk — the
   // backend is executing MCP tools, mirroring the classic drawer's indicator
   const [isProcessingTools, setIsProcessingTools] = useState(false)
+  const [activeToolName, setActiveToolName] = useState<string | null>(null)
   const [agents, setAgents] = useState<ChatAgent[]>([])
   const [agentId, setAgentId] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
@@ -614,6 +615,8 @@ export default function Chat({
               type?: string
               content?: string
               error?: string
+              tool_name?: string
+              action_id?: string
               windowed_messages?: number
               remaining_messages?: number
             }
@@ -623,6 +626,7 @@ export default function Chat({
               continue
             }
             if (ev.error) throw new Error(ev.error)
+            if (ev.type === 'error') throw new Error(ev.content || 'Local model request failed')
             if (ev.type === 'thinking_start') {
               setIsThinking(true)
               curThinking = ''
@@ -635,7 +639,18 @@ export default function Chat({
               // backend is running MCP tools — show the live indicator and
               // separate any tool output from the prose preceding it
               setIsProcessingTools(true)
+              setActiveToolName(ev.tool_name || null)
               if (curText && !curText.endsWith('\n\n')) curText += '\n\n'
+            } else if (ev.type === 'tool_result') {
+              // Tool execution has finished; the next quiet period is the
+              // model composing its answer, not a still-running tool.
+              setIsProcessingTools(false)
+              setActiveToolName(null)
+            } else if (ev.type === 'approval_required') {
+              setIsProcessingTools(false)
+              setActiveToolName(null)
+              curText += `_[Approval required${ev.action_id ? `: ${ev.action_id}` : ''}.]_\n\n`
+              setStreamText(curText)
             } else if (ev.type === 'context_windowed') {
               curText +=
                 `_[Context compressed: ${ev.windowed_messages ?? 0} older ` +
@@ -690,6 +705,7 @@ export default function Chat({
       setStreamThinking('')
       setIsThinking(false)
       setIsProcessingTools(false)
+      setActiveToolName(null)
       abortRef.current = null
     }
   }
@@ -1032,7 +1048,7 @@ export default function Chat({
                 {isThinking
                   ? 'Vigil is reasoning'
                   : isProcessingTools
-                    ? 'Vigil is running tools'
+                    ? `Vigil is running ${activeToolName || 'tools'}`
                     : streamText
                       ? 'Vigil is responding'
                       : 'Vigil is working on it'}
