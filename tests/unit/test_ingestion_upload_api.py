@@ -26,6 +26,7 @@ class _FakeService:
     gate: threading.Event = None
     result: dict = {}
     calls: list = []
+    evidence_calls: list = []
 
     def __init__(self):
         self.stats = {
@@ -39,8 +40,19 @@ class _FakeService:
             "cases_errors": 0,
         }
 
-    def _ingest_file_by_format(self, file_path, fmt, data_type="finding"):
+    def _ingest_file_by_format(
+        self,
+        file_path,
+        fmt,
+        data_type="finding",
+        evidence_file_path=None,
+        merge_source_evidence=False,
+    ):
         type(self).calls.append((fmt, data_type))
+        if evidence_file_path is not None:
+            type(self).evidence_calls.append(
+                (Path(evidence_file_path).suffix, merge_source_evidence)
+            )
         if type(self).gate is not None:
             type(self).gate.wait(timeout=5)
         self.stats.update(type(self).result)
@@ -52,6 +64,7 @@ def client(monkeypatch):
     _FakeService.gate = None
     _FakeService.result = {"findings_total": 2, "findings_imported": 2}
     _FakeService.calls = []
+    _FakeService.evidence_calls = []
 
     registry = IngestionJobRegistry()
     monkeypatch.setattr(ingestion_api, "get_job_registry", lambda: registry)
@@ -68,6 +81,17 @@ def _upload(client, name="export.parquet", body=b"payload", data_type="finding")
         "/api/ingest/upload",
         files={"file": (name, body, "application/octet-stream")},
         data={"data_type": data_type},
+    )
+
+
+def _upload_with_evidence(client, *, merge="true", evidence_name="flows.parquet"):
+    return client.post(
+        "/api/ingest/upload",
+        files={
+            "file": ("labels.parquet", b"labels", "application/octet-stream"),
+            "evidence_file": (evidence_name, b"flows", "application/octet-stream"),
+        },
+        data={"data_type": "finding", "evidence_merge": merge},
     )
 
 
@@ -175,3 +199,37 @@ def test_the_declared_data_type_reaches_the_service(client):
     _await_terminal(client, job_id)
 
     assert _FakeService.calls == [("jsonl", "case")]
+
+
+def test_companion_parquet_reaches_explicit_evidence_merge_mode(client):
+    response = _upload_with_evidence(client)
+    assert response.status_code == 202
+    _await_terminal(client, response.json()["job_id"])
+
+    assert _FakeService.calls == [("parquet", "finding")]
+    assert _FakeService.evidence_calls == [(".parquet", True)]
+
+
+def test_companion_requires_merge_mode(client):
+    response = _upload_with_evidence(client, merge="false")
+
+    assert response.status_code == 400
+    assert "evidence_merge" in response.json()["detail"]
+
+
+def test_merge_mode_requires_a_companion(client):
+    response = client.post(
+        "/api/ingest/upload",
+        files={"file": ("labels.parquet", b"labels", "application/octet-stream")},
+        data={"data_type": "finding", "evidence_merge": "true"},
+    )
+
+    assert response.status_code == 400
+    assert "requires a companion" in response.json()["detail"]
+
+
+def test_companion_must_be_canonical_parquet(client):
+    response = _upload_with_evidence(client, evidence_name="flows.pcap")
+
+    assert response.status_code == 400
+    assert ".parquet" in response.json()["detail"]

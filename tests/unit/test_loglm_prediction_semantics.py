@@ -68,18 +68,22 @@ def test_invalid_confidence_is_rejected(service, confidence):
         service._parquet_row_to_finding(_row(confidence_score=confidence))
 
 
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"incident_pred": 0, "malicious": True},
-        {"incident_pred": 1, "malicious": False, "label": "Attack"},
-        {"incident_pred": 0, "label": "Malicious"},
-        {"incident_pred": 2},
-    ],
-)
-def test_contradictory_or_invalid_verdict_is_rejected(service, overrides):
-    with pytest.raises(ValueError):
-        service._parquet_row_to_finding(_row(**overrides))
+def test_model_prediction_and_ground_truth_are_preserved_separately(service):
+    finding = service._parquet_row_to_finding(
+        _row(incident_pred=1, malicious=False, label="Attack")
+    )
+
+    assert finding["anomaly_score"] == 1.0
+    assert finding["severity"] == "critical"
+    assert finding["status"] == "new"
+    assert finding["entity_context"]["malicious"] is False
+    assert finding["entity_context"]["ground_truth_malicious"] is False
+    assert finding["entity_context"]["evaluation_result"] == "false_positive"
+
+
+def test_invalid_prediction_is_rejected(service):
+    with pytest.raises(ValueError, match="incident_pred must be 0 \(benign\) or 1"):
+        service._parquet_row_to_finding(_row(incident_pred=2))
 
 
 def test_loglm_provenance_is_preserved(service):

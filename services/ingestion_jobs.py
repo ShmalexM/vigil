@@ -151,20 +151,40 @@ def summarize_stats(stats: Dict[str, int]) -> tuple:
         messages.append(f"{stats['findings_errors']} finding errors")
     if stats.get("cases_errors", 0) > 0:
         messages.append(f"{stats['cases_errors']} case errors")
+    if stats.get("evidence_matched", 0) > 0:
+        messages.append(f"Matched evidence for {stats['evidence_matched']} findings")
+    if stats.get("evidence_merged", 0) > 0:
+        messages.append(f"Merged evidence into {stats['evidence_merged']} findings")
+    if stats.get("evidence_unavailable", 0) > 0:
+        messages.append(f"Evidence unavailable for {stats['evidence_unavailable']} findings")
+    if stats.get("evidence_conflicted", 0) > 0:
+        messages.append(f"Evidence conflicted for {stats['evidence_conflicted']} findings")
 
     return success, ". ".join(messages) if messages else "No data imported"
 
 
-def run_job(job: IngestionJob, source_path: Path) -> None:
+def run_job(
+    job: IngestionJob,
+    source_path: Path,
+    evidence_path: Optional[Path] = None,
+    merge_source_evidence: bool = False,
+    protocol_evidence_path: Optional[Path] = None,
+) -> None:
     """Ingest source_path on a worker thread, then delete it. Never raises."""
     from services.ingestion_service import IngestionService
 
     try:
         service = IngestionService()
         job.track(service.stats)
-        stats = service._ingest_file_by_format(
-            source_path, job.format, data_type=job.data_type
-        )
+        ingest_kwargs = {"data_type": job.data_type}
+        if evidence_path is not None:
+            ingest_kwargs.update(
+                evidence_file_path=evidence_path,
+                merge_source_evidence=merge_source_evidence,
+            )
+            if protocol_evidence_path is not None:
+                ingest_kwargs["protocol_evidence_file_path"] = protocol_evidence_path
+        stats = service._ingest_file_by_format(source_path, job.format, **ingest_kwargs)
         success, message = summarize_stats(stats or {})
         if success:
             job.finish(message)
@@ -175,3 +195,7 @@ def run_job(job: IngestionJob, source_path: Path) -> None:
         job.fail(f"Ingestion failed: {e}")
     finally:
         source_path.unlink(missing_ok=True)
+        if evidence_path is not None:
+            evidence_path.unlink(missing_ok=True)
+        if protocol_evidence_path is not None:
+            protocol_evidence_path.unlink(missing_ok=True)

@@ -110,6 +110,9 @@ async def _spool_upload(file: UploadFile, suffix: str) -> Path:
 @router.post("/upload", response_model=IngestionJobStatus, status_code=202)
 async def upload_and_ingest_file(
     file: UploadFile = File(...),
+    evidence_file: Optional[UploadFile] = File(None),
+    protocol_evidence_file: Optional[UploadFile] = File(None),
+    evidence_merge: bool = Form(False),
     data_type: str = Form("finding"),
     format: Optional[str] = Form(None)
 ):
@@ -129,19 +132,80 @@ async def upload_and_ingest_file(
     if format not in ['json', 'csv', 'jsonl', 'parquet']:
         raise HTTPException(status_code=400, detail="format must be 'json', 'csv', 'jsonl', or 'parquet'")
 
+    if evidence_file is not None and (format != 'parquet' or data_type != 'finding'):
+        raise HTTPException(
+            status_code=400,
+            detail="Companion evidence is supported only for finding-label Parquet uploads",
+        )
+    if evidence_file is not None and not evidence_merge:
+        raise HTTPException(
+            status_code=400,
+            detail="Enable evidence_merge when uploading a companion artifact",
+        )
+    if evidence_merge and evidence_file is None:
+        raise HTTPException(
+            status_code=400,
+            detail="evidence_merge requires a companion canonical-NetFlow Parquet",
+        )
+    if protocol_evidence_file is not None and evidence_file is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Protocol evidence requires sequence flow evidence",
+        )
+    if evidence_file is not None:
+        evidence_name = evidence_file.filename or ''
+        if Path(evidence_name).suffix.lower() != '.parquet':
+            raise HTTPException(
+                status_code=400,
+                detail="The companion evidence artifact must be a .parquet file",
+            )
+
     temp_path = await _spool_upload(file, f'.{format}')
+    evidence_temp_path: Optional[Path] = None
+    protocol_evidence_temp_path: Optional[Path] = None
+    try:
+        if evidence_file is not None:
+            evidence_temp_path = await _spool_upload(evidence_file, '.parquet')
+        if protocol_evidence_file is not None:
+            protocol_name = protocol_evidence_file.filename or ''
+            if Path(protocol_name).suffix.lower() != '.parquet':
+                raise HTTPException(
+                    status_code=400,
+                    detail="The protocol evidence artifact must be a .parquet file",
+                )
+            protocol_evidence_temp_path = await _spool_upload(
+                protocol_evidence_file, '.protocol-evidence.parquet'
+            )
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        if evidence_temp_path is not None:
+            evidence_temp_path.unlink(missing_ok=True)
+        raise
 
     job = IngestionJob(filename=filename, fmt=format, data_type=data_type)
     try:
         get_job_registry().start(job)
     except IngestionJobConflict as conflict:
         temp_path.unlink(missing_ok=True)
+        if evidence_temp_path is not None:
+            evidence_temp_path.unlink(missing_ok=True)
+        if protocol_evidence_temp_path is not None:
+            protocol_evidence_temp_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=409,
             detail=f"Already ingesting '{conflict.active.filename}'. Wait for it to finish."
         )
 
-    task = asyncio.create_task(run_in_threadpool(run_job, job, temp_path))
+    task = asyncio.create_task(
+        run_in_threadpool(
+            run_job,
+            job,
+            temp_path,
+            evidence_temp_path,
+            evidence_merge,
+            protocol_evidence_temp_path,
+        )
+    )
     _running_tasks.add(task)
     task.add_done_callback(_running_tasks.discard)
 

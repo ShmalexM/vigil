@@ -4,7 +4,9 @@ Vigil can retain a bounded preview of the source records that produced a
 finding. The preview lives at `finding.entity_context.source_evidence`, so it
 does not require a database migration. Finding list responses retain only the
 envelope metadata with `payload_included: false`;
-`GET /api/findings/{finding_id}` returns the payload.
+`GET /api/findings/{finding_id}` returns the payload. The evidence-first UI
+requests `?include_embedding=false`; callers that omit the parameter retain
+the existing full-detail response.
 
 ## Contract
 
@@ -14,7 +16,8 @@ envelope metadata with `payload_included: false`;
   "telemetry_kind": "netflow",
   "schema_id": "netflow.v1",
   "status": "available",
-  "provenance": "embedded",
+  "provenance": "joined",
+  "association_basis": "exact_sequence",
   "total_records": 150,
   "truncated": true,
   "records": [],
@@ -35,9 +38,12 @@ the producer and should be versioned when its record fields change.
 - `redacted`: evidence existed but was intentionally removed before ingestion.
 - `invalid`: evidence was supplied but failed contract validation.
 
-No envelope means the finding has no declared source-evidence capability, so
-the finding dialog hides the section. The other non-available states render a
-short, truthful message.
+No envelope means the finding has no declared source-evidence capability. The
+Evidence tab renders this as `undeclared` and does not choose a renderer from
+`data_source`. The other non-available states render a short, truthful message.
+
+`association_basis` is accepted only for joined evidence and currently must be
+`exact_sequence`. It is never inferred from endpoint or time overlap.
 
 ## LogLM Parquet inputs
 
@@ -57,6 +63,32 @@ Ingestion retains at most 100 structured records and 64 KiB of raw text per
 finding, records truncation metadata, converts non-finite numbers to `null`,
 and never lets malformed evidence prevent the finding itself from ingesting.
 
+## Companion canonical-NetFlow merge
+
+Manual upload accepts an optional companion `.parquet` only when explicit
+evidence-merge mode is enabled. The labels and companion flows are preflighted
+before the first database write. Every label must match on:
+
+- dataset and run IDs;
+- the unordered endpoint pair (reverse traffic is allowed);
+- chunk start and chunk ordinal;
+- event window;
+- declared row count.
+
+The companion may carry the exact `sequence_id` on each row. If it does not,
+each row must carry `chunk_start_ms` and `chunk_ordinal`. Missing, partial, or
+contradictory groups fail the complete upload; no evidence is partially
+attached. A successful join stores an allowlisted canonical NetFlow preview,
+not packet data, packet payloads, or local artifact paths.
+
+For an existing finding, re-import may update only
+`entity_context.source_evidence` after immutable sequence/provenance checks.
+Verdict, confidence, anomaly score, severity, analyst status, description, and
+run/model provenance are not overwritten. An identical re-import is skipped.
+
+Ingestion job statistics expose `evidence_matched`, `evidence_unavailable`,
+`evidence_conflicted`, and `evidence_merged`.
+
 ## Canonical record fields
 
 The built-in tables recognize these v1 field names:
@@ -69,3 +101,7 @@ The built-in tables recognize these v1 field names:
 
 HTTP-session and generic-log records render as ordered, expandable key/value
 records so source fields remain visible without inventing a universal schema.
+
+NetFlow is presented as **normalized source-flow records**, never packet data.
+The finding payload contains at most 100 records and reports the source total
+and truncation state.

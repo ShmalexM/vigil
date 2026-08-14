@@ -46,8 +46,8 @@ class _FakeService:
         self._on_ingest = on_ingest
         self.calls = []
 
-    def _ingest_file_by_format(self, file_path, fmt, data_type="finding"):
-        self.calls.append((Path(file_path), fmt, data_type))
+    def _ingest_file_by_format(self, file_path, fmt, data_type="finding", **kwargs):
+        self.calls.append((Path(file_path), fmt, data_type, kwargs))
         if self._raises is not None:
             raise self._raises
         if self._on_ingest is not None:
@@ -143,7 +143,54 @@ def test_run_job_forwards_the_declared_data_type(monkeypatch, spooled):
 
     run_job(job, spooled)
 
-    assert service.calls == [(spooled, "jsonl", "case")]
+    assert service.calls == [(spooled, "jsonl", "case", {})]
+
+
+def test_run_job_forwards_and_deletes_companion_evidence(monkeypatch, spooled, tmp_path):
+    evidence = tmp_path / "evidence.parquet"
+    evidence.write_bytes(b"flows")
+    service = _FakeService(result={"findings_skipped": 1, "evidence_merged": 1})
+    _patch_service(monkeypatch, service)
+    job = IngestionJob("labels.parquet", "parquet", "finding")
+
+    run_job(job, spooled, evidence, True)
+
+    assert service.calls == [(
+        spooled,
+        "parquet",
+        "finding",
+        {"evidence_file_path": evidence, "merge_source_evidence": True},
+    )]
+    assert not spooled.exists()
+    assert not evidence.exists()
+    assert job.status == SUCCEEDED
+
+
+def test_run_job_forwards_and_deletes_protocol_evidence(monkeypatch, spooled, tmp_path):
+    evidence = tmp_path / "sequence-evidence.parquet"
+    evidence.write_bytes(b"flows")
+    protocol_evidence = tmp_path / "sequence-modbus-evidence.parquet"
+    protocol_evidence.write_bytes(b"modbus")
+    service = _FakeService(result={"findings_skipped": 1, "evidence_merged": 1})
+    _patch_service(monkeypatch, service)
+    job = IngestionJob("labels.parquet", "parquet", "finding")
+
+    run_job(job, spooled, evidence, True, protocol_evidence)
+
+    assert service.calls == [(
+        spooled,
+        "parquet",
+        "finding",
+        {
+            "evidence_file_path": evidence,
+            "protocol_evidence_file_path": protocol_evidence,
+            "merge_source_evidence": True,
+        },
+    )]
+    assert not spooled.exists()
+    assert not evidence.exists()
+    assert not protocol_evidence.exists()
+    assert job.status == SUCCEEDED
 
 
 # --- progress -------------------------------------------------------------

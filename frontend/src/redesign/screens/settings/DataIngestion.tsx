@@ -52,7 +52,10 @@ const ACCEPTED_UPLOAD_TYPES = '.parquet,.csv,.json,.jsonl,.ndjson'
 function ManualUploadPanel({ notify }: SectionProps) {
   const { job, attaching, upload } = useIngestionJob()
   const fileRef = useRef<HTMLInputElement>(null)
+  const evidenceRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null)
+  const [evidenceMerge, setEvidenceMerge] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const running = job?.status === 'running'
 
@@ -60,8 +63,13 @@ function ManualUploadPanel({ notify }: SectionProps) {
     if (!file) return
     setSubmitting(true)
     try {
-      await upload(file)
+      await upload(file, evidenceFile && evidenceMerge ? {
+        evidenceFile,
+        evidenceMerge: true,
+      } : undefined)
       setFile(null)
+      setEvidenceFile(null)
+      setEvidenceMerge(false)
       notify('ok', `Ingesting ${file.name} in the background.`)
     } catch (e) {
       notify('err', (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Upload failed.')
@@ -69,6 +77,8 @@ function ManualUploadPanel({ notify }: SectionProps) {
       setSubmitting(false)
     }
   }
+
+  const parquetSelected = file?.name.toLowerCase().endsWith('.parquet') === true
 
   return (
     <SettingsCard
@@ -82,18 +92,65 @@ function ManualUploadPanel({ notify }: SectionProps) {
           accept={ACCEPTED_UPLOAD_TYPES}
           className="hidden"
           data-testid="manual-upload-input"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          onChange={(e) => {
+            const next = e.target.files?.[0] || null
+            setFile(next)
+            if (!next?.name.toLowerCase().endsWith('.parquet')) {
+              setEvidenceFile(null)
+              setEvidenceMerge(false)
+            }
+          }}
           onClick={(e) => { (e.target as HTMLInputElement).value = '' }} // lets the same file be retried
         />
         <button className="btn ghost" onClick={() => fileRef.current?.click()} disabled={running}>
           <Icon name="paperclip" /> {file ? file.name : 'Choose File'}
         </button>
         {file && <span className="text-xs text-tx-3">{formatFileSize(file.size)}</span>}
-        <button className="btn primary" disabled={!file || submitting || running || attaching} onClick={doUpload}>
+        <button className="btn primary" disabled={!file || submitting || running || attaching || (evidenceMerge && !evidenceFile)} onClick={doUpload}>
           <Icon name="upload" /> {submitting ? 'Uploading…' : 'Upload'}
         </button>
       </div>
       <p className="text-xs text-tx-3 mt-1.5">Allowed file types: .parquet, .csv, .json, .jsonl, .ndjson.</p>
+
+      {parquetSelected && (
+        <div className="mt-4 pt-4 border-t border-line-soft flex flex-col gap-2.5">
+          <label className="flex items-start gap-2.5 text-sm text-tx-2">
+            <input
+              type="checkbox"
+              checked={evidenceMerge}
+              onChange={(event) => {
+                setEvidenceMerge(event.target.checked)
+                if (!event.target.checked) setEvidenceFile(null)
+              }}
+              disabled={running || submitting}
+              aria-label="Merge exact companion evidence"
+            />
+            <span>
+              Merge exact companion evidence
+              <span className="block text-xs text-tx-3 mt-1">
+                Optional preview: join canonical NetFlow only when every sequence identity matches exactly.
+              </span>
+            </span>
+          </label>
+          {evidenceMerge && (
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <input
+                ref={evidenceRef}
+                type="file"
+                accept=".parquet"
+                className="hidden"
+                data-testid="evidence-upload-input"
+                onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)}
+                onClick={(event) => { (event.target as HTMLInputElement).value = '' }}
+              />
+              <button className="btn ghost" onClick={() => evidenceRef.current?.click()} disabled={running}>
+                <Icon name="paperclip" /> {evidenceFile ? evidenceFile.name : 'Choose canonical NetFlow Parquet'}
+              </button>
+              {evidenceFile && <span className="text-xs text-tx-3">{formatFileSize(evidenceFile.size)}</span>}
+            </div>
+          )}
+        </div>
+      )}
 
       {job && <IngestionJobStatus job={job} />}
     </SettingsCard>
@@ -116,10 +173,23 @@ function IngestionJobStatus({ job }: { job: IngestionJob }) {
     )
   }
   const ok = job.status === 'succeeded'
+  const evidenceStats = [
+    ['matched', job.stats.evidence_matched],
+    ['merged', job.stats.evidence_merged],
+    ['unavailable', job.stats.evidence_unavailable],
+    ['conflicted', job.stats.evidence_conflicted],
+  ].filter(([, value]) => typeof value === 'number' && value > 0)
   return (
     <div className={`settings-banner ${ok ? 'ok' : 'err'} mt-3`}>
       <Icon name={ok ? 'check2' : 'alert'} size={13} />
-      <span className="text-xs"><span className="font-mono">{job.filename}</span> — {job.message}</span>
+      <span className="text-xs">
+        <span className="font-mono">{job.filename}</span> — {job.message}
+        {evidenceStats.length > 0 && (
+          <span className="block mt-1 text-tx-3">
+            Evidence: {evidenceStats.map(([label, value]) => `${label} ${value}`).join(' · ')}
+          </span>
+        )}
+      </span>
     </div>
   )
 }

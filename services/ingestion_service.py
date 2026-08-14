@@ -24,7 +24,14 @@ from io import StringIO
 
 from services.source_evidence import (
     normalize_finding_source_evidence,
+    normalize_source_evidence,
     source_evidence_from_loglm_row,
+)
+from services.netflow_evidence import EvidenceJoinError, join_canonical_netflow
+from services.evidence_store import (
+    SequenceEvidenceBundle,
+    SequenceEvidenceError,
+    SequenceEvidenceStore,
 )
 
 logger = logging.getLogger(__name__)
@@ -146,8 +153,15 @@ class IngestionService:
             'cases_imported': 0,
             'cases_skipped': 0,
             'cases_errors': 0,
+            'evidence_matched': 0,
+            'evidence_unavailable': 0,
+            'evidence_conflicted': 0,
+            'evidence_merged': 0,
         }
         self._identity_warned: set = set()
+        self._merge_source_evidence = False
+        self._evidence_existing_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+        self._fallback_data_service = None
 
     def _identity_fallback(
         self,
@@ -239,6 +253,11 @@ class IngestionService:
                 # Check if finding already exists
                 existing = self.db_service.get_finding(finding_id)
                 if existing:
+                    existing_dict = existing.to_dict() if hasattr(existing, 'to_dict') else existing
+                    if self._merge_source_evidence:
+                        return self._merge_duplicate_source_evidence(
+                            existing_dict, finding_data
+                        )
                     logger.debug(f"Finding {finding_id} already exists, skipping")
                     self.stats['findings_skipped'] += 1
                     return True
@@ -273,12 +292,18 @@ class IngestionService:
                     return False
             else:
                 # Fallback to JSON file storage
-                from services.database_data_service import DatabaseDataService
-                data_service = DatabaseDataService()
+                data_service = self._get_fallback_data_service()
                 findings = data_service.get_findings()
                 
                 # Check for duplicate
-                if any(f.get('finding_id') == finding_id for f in findings):
+                existing = next(
+                    (f for f in findings if f.get('finding_id') == finding_id), None
+                )
+                if existing:
+                    if self._merge_source_evidence:
+                        return self._merge_duplicate_source_evidence(
+                            existing, finding_data
+                        )
                     self.stats['findings_skipped'] += 1
                     return True
                 
@@ -298,6 +323,14 @@ class IngestionService:
     def _ingest_finding_batch(self, finding_dicts: List[Dict[str, Any]]) -> None:
         """Bulk-dedup and insert a batch in one DB round trip, vs. per-row ingest_finding."""
         if not finding_dicts:
+            return
+
+        # Evidence merge is intentionally a bounded preview path.  Per-row
+        # handling lets duplicate findings update only entity_context evidence;
+        # the normal high-volume ingest retains the bulk insert fast path.
+        if self._merge_source_evidence:
+            for finding_data in finding_dicts:
+                self.ingest_finding(finding_data)
             return
 
         if not self.use_database or not self.db_service:
@@ -785,11 +818,16 @@ class IngestionService:
     def ingest_parquet_file(
         self,
         file_path: Union[str, Path],
-        data_source: str = 'flow'
+        data_source: str = 'flow',
+        evidence_file_path: Optional[Union[str, Path]] = None,
+        protocol_evidence_file_path: Optional[Union[str, Path]] = None,
+        merge_source_evidence: bool = False,
     ) -> Dict[str, Any]:
         """LogLM embedding exports route through _parquet_row_to_finding; anything
         else ingests generically via _generic_row_to_finding."""
         self.reset_stats()
+        self._merge_source_evidence = False
+        self._evidence_existing_cache.clear()
         file_path = Path(file_path)
 
         if not file_path.exists():
@@ -808,6 +846,82 @@ class IngestionService:
 
             schema_kind = self._detect_parquet_schema(col_names)
             logger.info(f"Detected parquet schema: {schema_kind}")
+
+            if evidence_file_path is not None:
+                if not merge_source_evidence:
+                    raise EvidenceJoinError(
+                        "A companion artifact requires evidence merge mode"
+                    )
+                if schema_kind != 'loglm':
+                    raise EvidenceJoinError(
+                        "Companion evidence can only be joined to LogLM sequence labels"
+                    )
+                label_rows = self._read_parquet_rows(parquet_file)
+                evidence_parquet = pq.ParquetFile(Path(evidence_file_path))
+                evidence_columns = set(evidence_parquet.schema_arrow.names)
+                if {'evidence_schema_version', 'flow_id', 'sequence_row_ordinal'}.issubset(evidence_columns):
+                    bundle = SequenceEvidenceBundle(
+                        Path(evidence_file_path),
+                        Path(protocol_evidence_file_path)
+                        if protocol_evidence_file_path is not None
+                        else None,
+                    )
+                    self._preflight_sequence_bundle(label_rows, bundle)
+                    stored = SequenceEvidenceStore().persist(bundle)
+                    finding_batch = []
+                    for row in label_rows:
+                        joined_row = dict(row)
+                        joined_row['source_evidence'] = bundle.envelope(
+                            str(row['sequence_id']), stored
+                        )
+                        finding_batch.append(
+                            self._parquet_row_to_finding(joined_row, data_source)
+                        )
+                    self.stats['evidence_matched'] = len(finding_batch)
+                    self._merge_source_evidence = True
+                    self._preflight_evidence_merges(finding_batch)
+                    self._ingest_finding_batch(finding_batch)
+                    logger.info(
+                        "Exact sequence evidence ingestion complete: %s",
+                        self.stats,
+                    )
+                    return self.stats
+                if protocol_evidence_file_path is not None:
+                    raise EvidenceJoinError(
+                        "Protocol evidence requires a sequence-evidence/v1 companion artifact"
+                    )
+                flow_rows = self._read_parquet_rows(evidence_parquet)
+                joined = join_canonical_netflow(label_rows, flow_rows)
+                self.stats['evidence_matched'] = joined.matched
+                self.stats['evidence_unavailable'] = joined.unavailable
+                self.stats['evidence_conflicted'] = joined.conflicted
+                if (
+                    joined.matched != len(label_rows)
+                    or joined.unavailable
+                    or joined.conflicted
+                ):
+                    detail = joined.conflicts[0] if joined.conflicts else "missing exact sequence"
+                    raise EvidenceJoinError(
+                        "Evidence join failed closed: "
+                        f"matched {joined.matched} of {len(label_rows)}, "
+                        f"unavailable {joined.unavailable}, conflicted {joined.conflicted}. "
+                        f"{detail}"
+                    )
+
+                finding_batch = []
+                for row in label_rows:
+                    joined_row = dict(row)
+                    joined_row['source_evidence'] = joined.evidence_by_sequence[
+                        str(row['sequence_id'])
+                    ]
+                    finding_batch.append(
+                        self._parquet_row_to_finding(joined_row, data_source)
+                    )
+                self._merge_source_evidence = True
+                self._preflight_evidence_merges(finding_batch)
+                self._ingest_finding_batch(finding_batch)
+                logger.info(f"Parquet evidence ingestion complete: {self.stats}")
+                return self.stats
 
             sampled_first_row = False
             batch_size = 1000
@@ -834,12 +948,200 @@ class IngestionService:
             logger.info(f"Parquet ingestion complete: {self.stats}")
             return self.stats
 
+        except (EvidenceJoinError, SequenceEvidenceError):
+            raise
         except ImportError:
             logger.error("pyarrow is required for parquet ingestion: pip install pyarrow")
             return self.stats
         except Exception as e:
             logger.error(f"Error ingesting parquet file: {e}")
             return self.stats
+
+    @staticmethod
+    def _read_parquet_rows(parquet_file) -> List[Dict[str, Any]]:
+        """Read a bounded-preview parquet into row dictionaries for preflight."""
+        rows: List[Dict[str, Any]] = []
+        columns = parquet_file.schema_arrow.names
+        for batch in parquet_file.iter_batches(batch_size=1000):
+            values = batch.to_pydict()
+            length = len(next(iter(values.values()))) if values else 0
+            rows.extend(
+                {column: values[column][index] for column in columns}
+                for index in range(length)
+            )
+        return rows
+
+    @staticmethod
+    def _preflight_sequence_bundle(
+        label_rows: List[Dict[str, Any]], bundle: SequenceEvidenceBundle
+    ) -> None:
+        """Require one exact evidence membership for every finding sequence."""
+        seen: set[str] = set()
+        for row in label_rows:
+            sequence_id = str(row.get('sequence_id') or '')
+            if not sequence_id or sequence_id in seen:
+                raise SequenceEvidenceError(
+                    f"finding parquet has missing/duplicate sequence_id: {sequence_id!r}"
+                )
+            seen.add(sequence_id)
+            try:
+                row_count = int(row.get('row_count') or 0)
+            except (TypeError, ValueError) as exc:
+                raise SequenceEvidenceError(
+                    f"finding {sequence_id} has an invalid row_count"
+                ) from exc
+            if not bundle.has_sequence(sequence_id, row_count):
+                raise SequenceEvidenceError(
+                    f"no exact {row_count}-row evidence membership for {sequence_id}"
+                )
+            run_id = str(row.get('run_id') or '')
+            if run_id and run_id != bundle.run_id:
+                raise SequenceEvidenceError(
+                    f"run_id mismatch for {sequence_id}: {run_id} != {bundle.run_id}"
+                )
+            dataset_id = str(row.get('dataset_id') or '')
+            if dataset_id and dataset_id != bundle.dataset_id:
+                raise SequenceEvidenceError(
+                    f"dataset_id mismatch for {sequence_id}: "
+                    f"{dataset_id} != {bundle.dataset_id}"
+                )
+        evidence_sequences = set(bundle.flows_by_sequence)
+        if seen != evidence_sequences:
+            missing = sorted(seen - evidence_sequences)
+            extra = sorted(evidence_sequences - seen)
+            raise SequenceEvidenceError(
+                "finding/evidence sequence sets differ: "
+                f"missing={missing[:3]} extra={extra[:3]}"
+            )
+
+    def _get_fallback_data_service(self):
+        if self._fallback_data_service is None:
+            from services.database_data_service import DatabaseDataService
+            self._fallback_data_service = DatabaseDataService()
+        return self._fallback_data_service
+
+    @staticmethod
+    def _context_pair(context: Dict[str, Any]) -> tuple:
+        endpoints = [context.get('src_ip'), context.get('dst_ip')]
+        return tuple(sorted(str(value) for value in endpoints if value is not None))
+
+    @classmethod
+    def _immutable_evidence_identity(cls, finding: Dict[str, Any]) -> tuple:
+        context = finding.get('entity_context') or {}
+        # Demo imports may replace dataset_id with a UI alias while retaining
+        # the immutable producer identity in source_dataset_id. Evidence
+        # artifacts carry the producer dataset id, so prefer that value when
+        # it is available on the existing finding.
+        dataset = (
+            context.get('source_dataset_id')
+            or context.get('dataset_id')
+            or context.get('demo_dataset')
+        )
+        fields = (
+            dataset,
+            context.get('run_id'),
+            context.get('sequence_id'),
+            cls._context_pair(context),
+            context.get('chunk_start_ms'),
+            context.get('event_start_time'),
+            context.get('event_end_time'),
+            context.get('row_count'),
+            context.get('model_id'),
+            context.get('model_variant_id'),
+            context.get('tenant'),
+            context.get('verdict'),
+            context.get('incident_pred'),
+            context.get('label'),
+            context.get('malicious'),
+        )
+        return (finding.get('finding_id'), finding.get('data_source'), *fields)
+
+    def _existing_finding(self, finding_id: str) -> Optional[Dict[str, Any]]:
+        if finding_id in self._evidence_existing_cache:
+            return self._evidence_existing_cache[finding_id]
+        if self.use_database and self.db_service:
+            found = self.db_service.get_finding(finding_id)
+            existing = found.to_dict() if found and hasattr(found, 'to_dict') else found
+        else:
+            existing = self._get_fallback_data_service().get_finding(finding_id)
+        self._evidence_existing_cache[finding_id] = existing
+        return existing
+
+    def _preflight_evidence_merges(
+        self, finding_dicts: List[Dict[str, Any]]
+    ) -> None:
+        """Validate every duplicate before the first evidence write occurs."""
+        conflicts = []
+        for candidate in finding_dicts:
+            existing = self._existing_finding(candidate['finding_id'])
+            if existing is None:
+                continue
+            if self._immutable_evidence_identity(existing) != self._immutable_evidence_identity(candidate):
+                conflicts.append(candidate['finding_id'])
+        if conflicts:
+            self.stats['evidence_conflicted'] += len(conflicts)
+            raise EvidenceJoinError(
+                "Immutable finding identity mismatch for " + ", ".join(conflicts[:5])
+            )
+
+    def _merge_duplicate_source_evidence(
+        self,
+        existing: Dict[str, Any],
+        candidate: Dict[str, Any],
+    ) -> bool:
+        """Merge only exact joined evidence into an otherwise immutable finding."""
+        finding_id = candidate['finding_id']
+        if self._immutable_evidence_identity(existing) != self._immutable_evidence_identity(candidate):
+            self.stats['evidence_conflicted'] += 1
+            self.stats['findings_errors'] += 1
+            logger.error("Evidence merge identity mismatch for %s", finding_id)
+            return False
+
+        candidate_context = candidate.get('entity_context') or {}
+        candidate_evidence = normalize_source_evidence(
+            candidate_context.get('source_evidence')
+        )
+        exact_contract = (
+            candidate_evidence.get('version') == 2
+            and candidate_evidence.get('association_basis')
+            in {'producer_membership', 'sequence_builder_replay'}
+        ) or (
+            candidate_evidence.get('version') == 1
+            and candidate_evidence.get('association_basis') == 'exact_sequence'
+        )
+        if (
+            candidate_evidence.get('status') != 'available'
+            or candidate_evidence.get('provenance') != 'joined'
+            or not exact_contract
+        ):
+            self.stats['evidence_conflicted'] += 1
+            self.stats['findings_errors'] += 1
+            logger.error("Evidence merge contract is not exact for %s", finding_id)
+            return False
+
+        existing_context = dict(existing.get('entity_context') or {})
+        existing_raw_evidence = existing_context.get('source_evidence')
+        if existing_raw_evidence is not None:
+            existing_evidence = normalize_source_evidence(existing_raw_evidence)
+            if existing_evidence == candidate_evidence:
+                self.stats['findings_skipped'] += 1
+                return True
+
+        existing_context['source_evidence'] = candidate_evidence
+        if self.use_database and self.db_service:
+            updated = self.db_service.update_finding(
+                finding_id, entity_context=existing_context
+            )
+        else:
+            updated = self._get_fallback_data_service().update_finding(
+                finding_id, entity_context=existing_context
+            )
+        if not updated:
+            self.stats['findings_errors'] += 1
+            return False
+        self.stats['evidence_merged'] += 1
+        self.stats['findings_skipped'] += 1
+        return True
 
     def _parquet_row_to_finding(
         self,
@@ -919,14 +1221,10 @@ class IngestionService:
 
         malicious_verdict = _coerce_optional_verdict(row.get('malicious'), 'malicious')
         label_verdict = _label_verdict(row.get('label'))
-        if malicious_verdict is not None and malicious_verdict != is_attack:
-            raise ValueError(
-                "Contradictory verdict: incident_pred and malicious disagree"
-            )
-        if label_verdict is not None and label_verdict != is_attack:
-            raise ValueError(
-                "Contradictory verdict: incident_pred and label disagree"
-            )
+        # `incident_pred` is the model's prediction. `malicious`/`label` are
+        # evaluation labels and are allowed to disagree with that prediction;
+        # preserving that disagreement is necessary to represent false
+        # positives and false negatives in an evaluation import.
 
         anomaly_score = (
             prediction_confidence if is_attack else 1.0 - prediction_confidence
@@ -961,11 +1259,22 @@ class IngestionService:
         preserved_fields = (
             'label', 'malicious', 'tenant', 'dataset_id', 'run_id', 'model_id',
             'model_variant_id', 'chunk_start_ms', 'event_start', 'event_end',
-            'created_at',
+            'created_at', 'source_dataset_id',
         )
         for field in preserved_fields:
             if row.get(field) is not None:
                 entity_context[field] = row[field]
+
+        if malicious_verdict is not None:
+            entity_context['ground_truth_malicious'] = malicious_verdict
+            if is_attack and malicious_verdict:
+                entity_context['evaluation_result'] = 'true_positive'
+            elif is_attack and not malicious_verdict:
+                entity_context['evaluation_result'] = 'false_positive'
+            elif not is_attack and malicious_verdict:
+                entity_context['evaluation_result'] = 'false_negative'
+            else:
+                entity_context['evaluation_result'] = 'true_negative'
 
         if row.get('event_start_time') is not None:
             entity_context['event_start_time'] = int(row['event_start_time'])
@@ -1136,11 +1445,20 @@ class IngestionService:
         file_path: Path,
         fmt: str,
         data_source: str = 'flow',
-        data_type: str = 'finding'
+        data_type: str = 'finding',
+        evidence_file_path: Optional[Path] = None,
+        protocol_evidence_file_path: Optional[Path] = None,
+        merge_source_evidence: bool = False,
     ) -> Dict[str, Any]:
         """Dispatch a local file to the appropriate ingestion method."""
         if fmt == 'parquet':
-            return self.ingest_parquet_file(file_path, data_source=data_source)
+            return self.ingest_parquet_file(
+                file_path,
+                data_source=data_source,
+                evidence_file_path=evidence_file_path,
+                protocol_evidence_file_path=protocol_evidence_file_path,
+                merge_source_evidence=merge_source_evidence,
+            )
         elif fmt == 'csv':
             return self.ingest_csv_file(file_path, data_type=data_type)
         elif fmt == 'json':

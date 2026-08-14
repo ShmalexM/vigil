@@ -57,6 +57,7 @@ vi.mock('../services/api', () => ({
         data: { case_id: id, title: 'Defense Evasion: Obfuscated Loader', status: 'open', priority: 'high', assignee: 'j.reyes', finding_ids: ['f-1'], created_at: '2026-06-15T09:14:00Z' },
       }),
     getSummary: () => Promise.resolve({ data: { total: 7, by_status: { open: 5, investigating: 1, closed: 1 } } }),
+    create: () => Promise.resolve({ data: { case_id: 'case-created' } }),
   },
   findingsApi: {
     getAll: () =>
@@ -73,6 +74,10 @@ vi.mock('../services/api', () => ({
       }),
     getSummary: () => Promise.resolve({ data: { total: 40, by_severity: { critical: 7, high: 8, medium: 18, low: 7 } } }),
     getDatasetFacets: () => Promise.resolve({ data: { datasets: [], unassigned: 40, total: 40 } }),
+    getNeighbors: () => Promise.resolve({ data: { neighbors: [] } }),
+    getEnrichment: () => Promise.resolve({ data: { enrichment: null } }),
+    update: () => Promise.resolve({ data: {} }),
+    delete: () => Promise.resolve({ data: {} }),
   },
   agentsApi: {
     listAgents: () =>
@@ -119,6 +124,7 @@ vi.mock('../services/api', () => ({
       Promise.resolve({
         data: { events: [{ id: 'finding-f-1', start: '2026-06-12T11:36:33Z', type: 'finding', severity: 'medium', metadata: { finding_id: 'f-1' } }] },
       }),
+    getFindingContext: () => Promise.resolve({ data: { events: [] } }),
   },
   vstrikeApi: {
     iframeToken: () => Promise.resolve({ data: { token: 'test', iframe_url: 'about:blank' } }),
@@ -229,6 +235,16 @@ describe('SocConsole redesign', () => {
     renderConsole()
     expect(title()).toBe('Dashboard')
     expect(screen.getByText('Security operations overview')).toBeInTheDocument()
+  })
+
+  it('opens a finding directly from URL state without a preloaded list selection', async () => {
+    renderConsole('/dashboard?finding=f-direct&tab=evidence')
+
+    expect(await screen.findByText('Finding details')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Evidence' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Evidence unavailable')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /All findings/ }))
+    expect(screen.getByRole('tab', { name: 'Findings' })).toBeInTheDocument()
   })
 
   it('renders the 404 screen for an unknown path and routes home', async () => {

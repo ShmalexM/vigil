@@ -1,9 +1,11 @@
 """Findings API endpoints."""
 
+from collections.abc import Mapping
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 import logging
+import math
 
 from services.database_data_service import DatabaseDataService
 from core.config import vigil_path
@@ -17,6 +19,8 @@ from services.source_evidence import (
     normalize_finding_source_evidence,
     project_finding_source_evidence_for_list,
 )
+from services.evidence_store import SequenceEvidenceError, SequenceEvidenceStore
+from services.finding_dataset import normalized_dataset_id
 from api._meta import Auth, RouterMeta
 
 router = APIRouter()
@@ -103,8 +107,132 @@ def get_findings(
     }
 
 
+def _usable_embedding(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    try:
+        vector = [float(item) for item in value]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(item) for item in vector) or not any(item != 0 for item in vector):
+        return None
+    return vector
+
+
+@router.get("/{finding_id}/neighbors")
+def get_finding_neighbors(
+    finding_id: str,
+    limit: int = Query(5, ge=1, le=20),
+    same_dataset: bool = Query(True),
+):
+    """Return embedding neighbors as supporting context, never attack proof."""
+    seed = data_service.get_finding(finding_id)
+    if not seed:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    seed_embedding = _usable_embedding(seed.get("embedding"))
+    seed_dataset = normalized_dataset_id(seed)
+    if seed_embedding is None:
+        return {
+            "seed_finding": finding_id,
+            "dataset_id": seed_dataset,
+            "neighbors": [],
+            "context_only": True,
+            "reason": "The finding has no compatible non-zero embedding.",
+        }
+
+    raw = data_service.get_nearest_neighbors(
+        finding_id, limit=min(1000, max(limit * 10, 50))
+    )
+    if raw.get("error"):
+        raise HTTPException(status_code=503, detail=raw["error"])
+
+    neighbors = []
+    seen = set()
+    for candidate in raw.get("neighbors", []):
+        candidate_id = candidate.get("finding_id")
+        if not candidate_id or candidate_id in seen or candidate_id == finding_id:
+            continue
+        detail = data_service.get_finding(candidate_id)
+        if not detail:
+            continue
+        embedding = _usable_embedding(detail.get("embedding"))
+        if embedding is None or len(embedding) != len(seed_embedding):
+            continue
+        dataset_id = normalized_dataset_id(detail)
+        if same_dataset and dataset_id != seed_dataset:
+            continue
+        similarity = candidate.get("similarity")
+        if not isinstance(similarity, (int, float)) or not math.isfinite(float(similarity)):
+            continue
+        seen.add(candidate_id)
+        neighbors.append(
+            {
+                "finding_id": candidate_id,
+                "similarity": round(float(similarity), 4),
+                "severity": detail.get("severity"),
+                "anomaly_score": detail.get("anomaly_score"),
+                "data_source": detail.get("data_source"),
+                "dataset_id": dataset_id,
+                "timestamp": detail.get("timestamp"),
+                "description": detail.get("description"),
+            }
+        )
+        if len(neighbors) >= limit:
+            break
+    return {
+        "seed_finding": finding_id,
+        "dataset_id": seed_dataset,
+        "neighbors": neighbors,
+        "context_only": True,
+    }
+
+
+@router.get("/{finding_id}/source-evidence")
+def get_finding_source_evidence(
+    finding_id: str,
+    kind: str = Query("netflow", pattern="^(netflow|modbus)$"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """Page immutable raw-flow or Modbus records for one LogLM sequence."""
+    finding = data_service.get_finding(finding_id)
+    if not finding:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    normalized = normalize_finding_source_evidence(finding)
+    context = normalized.get("entity_context")
+    evidence = context.get("source_evidence") if isinstance(context, Mapping) else None
+    if not isinstance(evidence, Mapping) or evidence.get("version") != 2:
+        raise HTTPException(
+            status_code=404,
+            detail="Exact sequence evidence is not attached to this finding",
+        )
+    artifact = evidence.get("artifact")
+    if not isinstance(artifact, Mapping):
+        raise HTTPException(status_code=422, detail="Invalid evidence artifact reference")
+    try:
+        return SequenceEvidenceStore().query(
+            artifact_id=str(artifact.get("artifact_id") or ""),
+            sequence_id=str(evidence.get("sequence_id") or ""),
+            kind=kind,
+            offset=offset,
+            limit=limit,
+            expected_run_id=str(evidence.get("run_id") or ""),
+            expected_dataset_id=str(evidence.get("dataset_id") or ""),
+            expected_sha256=(
+                str(artifact.get("flow_sha256") or "")
+                if kind == "netflow"
+                else str(artifact.get("modbus_sha256") or "") or None
+            ),
+        )
+    except SequenceEvidenceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/{finding_id}")
-def get_finding(finding_id: str):
+def get_finding(
+    finding_id: str,
+    include_embedding: bool = Query(True),
+):
     """
     Get a specific finding by ID.
     
@@ -117,7 +245,12 @@ def get_finding(finding_id: str):
     finding = data_service.get_finding(finding_id)
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
-    return normalize_finding_source_evidence(finding)
+    normalized = normalize_finding_source_evidence(finding)
+    if include_embedding:
+        return normalized
+    projected = dict(normalized)
+    projected.pop("embedding", None)
+    return projected
 
 
 @router.get("/stats/summary")

@@ -3,6 +3,7 @@
    Ported from dashboard.js / attack.js / timeline.js.
    ============================================================ */
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Icon } from '../../shared/icons'
 import { Pie, Hbars } from '../../shared/charts'
 import { useFindings, useDashboardKpis } from './useFindings'
@@ -12,7 +13,7 @@ import { useTimeline } from './useTimeline'
 import { EmptyState, FilterButton, FilterGroup } from '../../shared/ui'
 import { DataTable, useTableSort, searchRows, sortRows, ColumnPicker } from '../../shared/DataTable'
 import { baseFindingColumns, extraFindingColumns } from './findingsColumns'
-import FindingPopup from './FindingPopup'
+import FindingDetail, { type FindingDetailTab } from './FindingPopup'
 import AttackTechniqueFindings from './AttackTechniqueFindings'
 import { SEV_COLOR, TL_MONTHS, type TimelineEvent } from './attackData'
 import type { ScreenProps } from '../../shared/types'
@@ -26,7 +27,14 @@ import VStrikeEntityView from './VStrikeEntityView'
 
 type DashTab = 'findings' | 'attack' | 'timeline' | 'entity'
 
-export default function DashboardScreen({ openChat, goSettings }: ScreenProps) {
+function detailTab(value: string | null): FindingDetailTab {
+  return value === 'evidence' || value === 'investigation' ? value : 'summary'
+}
+
+export default function DashboardScreen({ openChat, go, goSettings, setViewFull }: ScreenProps) {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedFinding = searchParams.get('finding')
+  const selectedDetailTab = detailTab(searchParams.get('tab'))
   const [tab, setTab] = useState<DashTab>('findings')
   const [datasetScope, setDatasetScope] = useState<DatasetScope>('all')
   const [datasetFacets, setDatasetFacets] = useState<DatasetFacets | null>(null)
@@ -52,6 +60,42 @@ export default function DashboardScreen({ openChat, goSettings }: ScreenProps) {
       clearInterval(id)
     }
   }, [])
+  useEffect(() => {
+    setViewFull(selectedFinding !== null)
+  }, [selectedFinding, setViewFull])
+
+  const openFinding = useCallback((id: string) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('finding', id)
+    next.set('tab', 'summary')
+    setSearchParams(next)
+  }, [searchParams, setSearchParams])
+  const openFindingTab = useCallback((nextTab: FindingDetailTab) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', nextTab)
+    setSearchParams(next)
+  }, [searchParams, setSearchParams])
+  const closeFinding = useCallback(() => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('finding')
+    next.delete('tab')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  if (selectedFinding) {
+    return (
+      <FindingDetail
+        id={selectedFinding}
+        tab={selectedDetailTab}
+        onTabChange={openFindingTab}
+        onBack={closeFinding}
+        onConfigureAi={() => goSettings('ai-config')}
+        openChat={openChat}
+        onCaseCreated={(caseId) => go('cases', { search: `?case=${encodeURIComponent(caseId)}` })}
+        onOpenFinding={openFinding}
+      />
+    )
+  }
   const datasetCounts = datasetScopeCounts(datasetFacets)
   const countSuffix = (count: number | null) => count === null ? '' : ` (${count})`
   return (
@@ -84,9 +128,9 @@ export default function DashboardScreen({ openChat, goSettings }: ScreenProps) {
           </select>
         </label>
       </div>
-      {tab === 'findings' && <FindingsTab openChat={openChat} goSettings={goSettings} datasetScope={datasetScope} />}
+      {tab === 'findings' && <FindingsTab openChat={openChat} goSettings={goSettings} datasetScope={datasetScope} onOpenFinding={openFinding} />}
       {tab === 'attack' && <AttackTab datasetScope={datasetScope} />}
-      {tab === 'timeline' && <TimelineTab datasetScope={datasetScope} />}
+      {tab === 'timeline' && <TimelineTab datasetScope={datasetScope} onOpenFinding={openFinding} />}
       {tab === 'entity' && <VStrikeEntityView goSettings={goSettings} />}
     </>
   )
@@ -108,13 +152,13 @@ function FindingsTab({
   openChat,
   goSettings,
   datasetScope,
-}: Pick<ScreenProps, 'openChat' | 'goSettings'> & { datasetScope: DatasetScope }) {
+  onOpenFinding,
+}: Pick<ScreenProps, 'openChat' | 'goSettings'> & { datasetScope: DatasetScope; onOpenFinding: (id: string) => void }) {
   const { rows, phase, error, reload } = useFindings(datasetScope)
   const { kpis, reload: reloadKpis } = useDashboardKpis(datasetScope)
   const [query, setQuery] = useState('')
   const [sev, setSev] = useState('any')
   const [src, setSrc] = useState('any')
-  const [detailId, setDetailId] = useState<string | null>(null)
   const [pageSize, setPageSize] = useState(10)
   const [page, setPage] = useState(1)
   // null = untouched, so use each column's default visibility. An empty Set is
@@ -125,13 +169,13 @@ function FindingsTab({
   // loaded rows actually carry, so a new source needs no code change here.
   const allColumns = useMemo(() => {
     const base = baseFindingColumns(
-      (f) => setDetailId(f.id),
+      (f) => onOpenFinding(f.id),
       (f) => openChat(findingPrompt(f)),
     )
     const extra = extraFindingColumns(rows)
     // actions stay last
     return [...base.slice(0, -1), ...extra, base[base.length - 1]]
-  }, [rows, openChat])
+  }, [rows, openChat, onOpenFinding])
 
   // Columns marked visible:false start hidden but stay toggleable.
   const defaultHidden = useMemo(
@@ -257,7 +301,7 @@ function FindingsTab({
           error={error}
           sort={sort}
           onSort={toggleSort}
-          onRowClick={(f) => setDetailId(f.id)}
+          onRowClick={(f) => onOpenFinding(f.id)}
           onRetry={refresh}
           className="tbl findings-tbl"
           loadingMessage={<EmptyState loading table compact icon="search" title="Loading findings…" />}
@@ -300,7 +344,6 @@ function FindingsTab({
           ><Icon name="chevR" size={14} /></button>
         </span>
       </div>
-      <FindingPopup id={detailId} onClose={() => setDetailId(null)} onChanged={() => { reload(); reloadKpis() }} onConfigureAi={() => goSettings('ai-config')} />
     </>
   )
 }
@@ -508,13 +551,12 @@ function computeLayout(events: TimelineEvent[], zoom: number, containerW: number
   return { min, max, pxPerDay, innerW, plotH, bars, ticks, grids, months }
 }
 
-function TimelineTab({ datasetScope }: { datasetScope: DatasetScope }) {
+function TimelineTab({ datasetScope, onOpenFinding }: { datasetScope: DatasetScope; onOpenFinding: (id: string) => void }) {
   const [filter, setFilter] = useState<'all' | 'finding'>('all')
   const [speed, setSpeed] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [playing, setPlaying] = useState(false)
   const [containerW, setContainerW] = useState(800)
-  const [detailId, setDetailId] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const innerRef = useRef<HTMLDivElement>(null)
@@ -723,7 +765,7 @@ function TimelineTab({ datasetScope }: { datasetScope: DatasetScope }) {
               data-t={b.e.t}
               style={{ left: b.left, top: b.top, width: b.w }}
               title={`${b.e.id} · ${b.e.kind}`}
-              onClick={(ev) => { ev.stopPropagation(); if (b.e.kind === 'finding') setDetailId(b.e.id) }}
+              onClick={(ev) => { ev.stopPropagation(); if (b.e.kind === 'finding') onOpenFinding(b.e.id) }}
             >
               <i style={{ background: SEV_COLOR[b.e.sev] }} />
               <span>{b.label}</span>
@@ -732,7 +774,6 @@ function TimelineTab({ datasetScope }: { datasetScope: DatasetScope }) {
           <div className="tl-playhead" ref={playheadRef} style={{ display: 'none' }} />
         </div>
       </div>
-      <FindingPopup id={detailId} onClose={() => setDetailId(null)} />
     </>
   )
 }

@@ -81,6 +81,29 @@ describe('manual upload', () => {
     expect(vi.mocked(ingestionApi.uploadFile).mock.calls[0][0].name).toBe('flows.parquet')
   })
 
+  it('uploads a canonical NetFlow companion only in explicit evidence-merge mode', async () => {
+    vi.mocked(ingestionApi.uploadFile).mockResolvedValue({ data: runningJob } as never)
+    renderPanel()
+    await screen.findByText('Manual Upload')
+    chooseFile('labels.parquet')
+    fireEvent.click(screen.getByLabelText('Merge exact companion evidence'))
+
+    expect(screen.getByRole('button', { name: /^Upload$/ })).toBeDisabled()
+    fireEvent.change(screen.getByTestId('evidence-upload-input'), {
+      target: { files: [new File(['flows'], 'canonical-flows.parquet')] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^Upload$/ }))
+
+    await waitFor(() => expect(ingestionApi.uploadFile).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'labels.parquet' }),
+      'finding',
+      {
+        evidenceFile: expect.objectContaining({ name: 'canonical-flows.parquet' }),
+        evidenceMerge: true,
+      },
+    ))
+  })
+
   it('re-attaches to a job still running from a previous visit', async () => {
     vi.mocked(ingestionApi.listJobs).mockResolvedValue({ data: [runningJob] } as never)
     renderPanel()

@@ -95,6 +95,35 @@ def test_malformed_explicit_evidence_fails_closed_as_invalid():
     assert "records" not in evidence
 
 
+def test_exact_sequence_association_is_preserved_only_for_joined_evidence():
+    joined = normalize_source_evidence(
+        {
+            "version": 1,
+            "telemetry_kind": "netflow",
+            "schema_id": "canonical-netflow.v1",
+            "status": "available",
+            "provenance": "joined",
+            "association_basis": "exact_sequence",
+            "records": [
+                {
+                    "timestamp": "2026-07-21T12:00:00Z",
+                    "source_ip": "10.0.0.1",
+                    "destination_ip": "10.0.0.2",
+                }
+            ],
+        }
+    )
+    invalid = normalize_source_evidence(
+        {
+            **joined,
+            "provenance": "embedded",
+        }
+    )
+
+    assert joined["association_basis"] == "exact_sequence"
+    assert invalid["status"] == "invalid"
+
+
 def test_unknown_explicit_kind_fails_closed_instead_of_guessing():
     evidence = source_evidence_from_loglm_row(
         {

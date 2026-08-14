@@ -1331,7 +1331,8 @@ export function useIngestionJob() {
   }, [job?.job_id, job?.status])
 
   const upload = useCallback(
-    (file: File) => ingestionApi.uploadFile(file).then((res) => setJob(res.data)),
+    (file: File, options?: { evidenceFile?: File; evidenceMerge?: boolean }) =>
+      ingestionApi.uploadFile(file, 'finding', options).then((res) => setJob(res.data)),
     [],
   )
 

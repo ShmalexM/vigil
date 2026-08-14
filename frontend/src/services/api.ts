@@ -189,7 +189,20 @@ export const findingsApi = {
     force_refresh?: boolean
   }) => api.get('/findings/', { params }),
   
-  getById: (id: string) => api.get(`/findings/${id}`),
+  getById: (id: string, options?: { includeEmbedding?: boolean }) =>
+    api.get(`/findings/${id}`, {
+      params: options?.includeEmbedding === false ? { include_embedding: false } : undefined,
+    }),
+
+  getNeighbors: (id: string, limit: number = 5, sameDataset: boolean = true) =>
+    api.get(`/findings/${id}/neighbors`, {
+      params: { limit, same_dataset: sameDataset },
+    }),
+
+  getSourceEvidence: (
+    id: string,
+    params: { kind: 'netflow' | 'modbus'; offset?: number; limit?: number },
+  ) => api.get(`/findings/${id}/source-evidence`, { params }),
   
   getSummary: (params?: DatasetFilter) => api.get('/findings/stats/summary', { params }),
 
@@ -1170,10 +1183,16 @@ export const ingestionApi = {
   ingestS3File: (key: string) =>
     api.post('/ingest/s3-file', { key }),
   // Returns once the body is spooled; the ingest runs as a background job.
-  uploadFile: (file: File, dataType: string = 'finding') => {
+  uploadFile: (
+    file: File,
+    dataType: string = 'finding',
+    options?: { evidenceFile?: File; evidenceMerge?: boolean },
+  ) => {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('data_type', dataType)
+    if (options?.evidenceFile) formData.append('evidence_file', options.evidenceFile)
+    if (options?.evidenceMerge) formData.append('evidence_merge', 'true')
     return api.post<IngestionJob>('/ingest/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       timeout: 0,
