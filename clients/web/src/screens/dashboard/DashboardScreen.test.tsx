@@ -6,6 +6,7 @@ import { ToastProvider } from '../../shell/toast'
 import type { Finding } from '../../data/data'
 
 const state = vi.hoisted(() => ({ rows: [] as Finding[] }))
+vi.mock('../../extensions/ExtensionProvider', () => ({ useExtensions: () => ({ enabledIntegrations: ['vstrike'], loading: false, extensions: [], mountPoints: [], reload: vi.fn() }) }))
 vi.mock('./useFindings', () => ({
   useFindings: () => ({ rows: state.rows, phase: 'ready', reload: vi.fn() }),
   useDashboardKpis: () => ({ kpis: { findingsTotal: 41, findingsCritical: 30, findingsHigh: 10, casesTotal: 9, casesOpen: 2, casesInvestigating: 1 }, reload: vi.fn() }),

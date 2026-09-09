@@ -1,3 +1,4 @@
+import { useExtensions } from '../../extensions/ExtensionProvider'
 import VStrikePanel, { type GraphRequest } from '../../integrations/vstrike/VStrikePanel'
 import FindingsDrawer from './FindingsDrawer'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -26,12 +27,22 @@ import {
 type DashTab = 'findings' | 'attack' | 'timeline' | 'vstrike'
 
 export default function DashboardScreen({ openChat, goSettings, go }: ConsoleScreenProps) {
+  const { enabledIntegrations, loading: integrationsLoading } = useExtensions()
+  const vstrikeEnabled = !integrationsLoading && enabledIntegrations.includes('vstrike')
   const [tab, setTab] = useState<DashTab>('findings')
   const [visitedVStrike, setVisitedVStrike] = useState(false)
   const [eventsOpen, setEventsOpen] = useState(false)
   const [graphRequest, setGraphRequest] = useState<GraphRequest | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const requestSequence = useRef(0)
+  const activeTab = tab === 'vstrike' && !vstrikeEnabled ? 'findings' : tab
+  useEffect(() => {
+    if (vstrikeEnabled) return
+    setTab((value) => value === 'vstrike' ? 'findings' : value)
+    setVisitedVStrike(false)
+    setEventsOpen(false)
+    setGraphRequest(null)
+  }, [vstrikeEnabled])
   const showVStrike = (ips?: string[], findingId?: string) => {
     if (ips?.length) setGraphRequest({ id: ++requestSequence.current, ips, findingId })
     setVisitedVStrike(true); setEventsOpen(false); setDetailId(null); setTab('vstrike')
@@ -44,8 +55,8 @@ export default function DashboardScreen({ openChat, goSettings, go }: ConsoleScr
     ['findings', 'Findings'],
     ['attack', 'ATT&CK'],
     ['timeline', 'Timeline'],
-    ['vstrike', 'VStrike'],
   ]
+  if (vstrikeEnabled) tabs.push(['vstrike', 'VStrike'])
   return (
     <>
       <div className="flex items-center gap-3 flex-wrap px-[22px] py-[13px] border-b border-line tabbar">
@@ -54,8 +65,8 @@ export default function DashboardScreen({ openChat, goSettings, go }: ConsoleScr
             <button
               key={k}
               role="tab"
-              aria-selected={tab === k}
-              className={`tab${tab === k ? ' active' : ''}`}
+              aria-selected={activeTab === k}
+              className={`tab${activeTab === k ? ' active' : ''}`}
               onClick={() => { setDetailId(null); if (k === 'vstrike') showVStrike(); else setTab(k) }}
             >
               {label}
@@ -63,13 +74,13 @@ export default function DashboardScreen({ openChat, goSettings, go }: ConsoleScr
           ))}
         </div>
       </div>
-      <div hidden={tab !== 'findings'}>
-        <FindingsTab active={tab === 'findings'} openChat={openChat} goSettings={goSettings} go={go}
-          detailId={detailId} onDetail={setDetailId} onVStrike={openFindingGraph} onEvents={openEvents} />
+      <div hidden={activeTab !== 'findings'}>
+        <FindingsTab active={activeTab === 'findings'} openChat={openChat} goSettings={goSettings} go={go}
+          detailId={detailId} onDetail={setDetailId} onVStrike={vstrikeEnabled ? openFindingGraph : undefined} onEvents={vstrikeEnabled ? openEvents : undefined} />
       </div>
-      {tab === 'attack' && <AttackTab />}
-      {tab === 'timeline' && <TimelineTab />}
-      {visitedVStrike && <VStrikePanel active={tab === 'vstrike'} request={graphRequest} eventsOpen={eventsOpen}
+      {activeTab === 'attack' && <AttackTab />}
+      {activeTab === 'timeline' && <TimelineTab />}
+      {vstrikeEnabled && visitedVStrike && <VStrikePanel active={activeTab === 'vstrike'} request={graphRequest} eventsOpen={eventsOpen}
         onCloseEvents={() => setEventsOpen(false)} onOpenEvents={openEvents} onFocus={(ips) => showVStrike(ips)}
         onBack={() => setTab('findings')} onBackToFinding={(id) => { setTab('findings'); setDetailId(id) }}
         onConfigure={() => goSettings('integrations')} />}
@@ -88,7 +99,7 @@ function findingPrompt(f: Finding): string {
 }
 
 function FindingsTab({ openChat, goSettings, go, active, detailId, onDetail, onVStrike, onEvents }: Pick<ConsoleScreenProps, 'openChat' | 'goSettings' | 'go'> & {
-  active: boolean; detailId: string | null; onDetail: (id: string | null) => void; onVStrike: (finding: Finding) => void; onEvents: () => void
+  active: boolean; detailId: string | null; onDetail: (id: string | null) => void; onVStrike?: (finding: Finding) => void; onEvents?: () => void
 }) {
   const { notify } = useToast()
   const { rows, phase, error, reload } = useFindings()
@@ -251,7 +262,7 @@ function FindingsTab({ openChat, goSettings, go, active, detailId, onDetail, onV
 
         </FilterButton>
         <button className="btn ghost" onClick={() => setColumnsOpen(true)}>Columns</button>
-        <button className="btn ghost" onClick={onEvents}>VStrike events</button>
+        {onEvents && <button className="btn ghost" onClick={onEvents}>VStrike events</button>}
         <button className="btn ghost" onClick={() => openChat()}><Icon name="brain" />Ask Vigil</button>
         {columnsOpen && <FindingsDrawer title="Columns" onClose={() => setColumnsOpen(false)}>
           <p className="muted">Choose which fields appear in the findings queue.</p>

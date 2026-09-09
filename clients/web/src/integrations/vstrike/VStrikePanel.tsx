@@ -22,7 +22,7 @@ interface Props {
 export default function VStrikePanel(props: Props) {
   const { active, request, eventsOpen, onCloseEvents, onConfigure } = props
   const { enabledIntegrations, loading: integrationsLoading } = useExtensions()
-  const enabled = enabledIntegrations.includes('vstrike')
+  const enabled = !integrationsLoading && enabledIntegrations.includes('vstrike')
   const [connection, setConnection] = useState(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [url, setUrl] = useState<string>()

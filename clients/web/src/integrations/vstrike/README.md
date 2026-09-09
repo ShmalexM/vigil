@@ -2,6 +2,10 @@
 
 Enable **CloudCurrent VStrike** in **Settings → Integrations** and configure its URL,
 username, and password. The Dashboard's **VStrike** tab opens the external graph.
+The tab, inline finding/detail actions, and events button are shown only after
+integration settings have loaded and VStrike is enabled. Disabling it closes the
+graph and events drawer, cancels provider retries/polling, and returns an active
+VStrike view to the preserved findings queue.
 When several networks are available, choose one explicitly. Network and storyline
 choices come from the configured account; no deployment or scenario is hard-coded.
 
