@@ -1,9 +1,10 @@
 import { getAllIntegrations } from '../../config/integrations'
 import type { IntegrationMetadata } from '../../config/integrationSchema'
 
-export const HIDDEN_MCP_SERVERS = new Set(['splunk-selfhosted'])
+export const HIDDEN_MCP_SERVERS = new Set<string>()
 
 export const SERVER_TO_INTEGRATION = new Map(Object.entries({
+  'splunk-selfhosted': 'splunk',
   'aws-security': 'aws-security-hub',
   'gcp-scc': 'gcp-security',
   'elastic': 'elastic-siem',
@@ -25,6 +26,7 @@ export const WIP_SERVERS = new Set([
  *  than renaming the server id, which is load-bearing (mcp-config.json, backend
  *  registration, persisted enabled-state store). */
 export const SERVER_DISPLAY_NAMES = new Map(Object.entries({
+  'splunk-selfhosted': 'Splunk (self-hosted REST)',
   loglm: 'LogLM',
   'deeptempo-findings': 'Findings & Cases',
   'tempo-flow': 'Agent Workflows',
@@ -42,7 +44,7 @@ export const MCP_CATEGORIES: McpCategory[] = [
   { label: 'DeepTempo', servers: ['loglm'] },
   { label: 'Reference Servers', servers: ['github'] },
   { label: 'EDR / XDR', servers: ['crowdstrike', 'sentinelone', 'carbon-black', 'microsoft-defender'] },
-  { label: 'SIEM / Data Lake', servers: ['splunk', 'elastic', 'azure-sentinel', 'gcp-secops', 'cribl-stream'] },
+  { label: 'SIEM / Data Lake', servers: ['splunk', 'splunk-selfhosted', 'elastic', 'azure-sentinel', 'gcp-secops', 'cribl-stream'] },
   { label: 'Threat Intelligence', servers: ['virustotal', 'gcp-threat-intel', 'shodan', 'alienvault-otx', 'misp', 'firecrawl'] },
   { label: 'Cloud Security', servers: ['aws-security', 'gcp-scc', 'palo-alto'] },
   { label: 'Identity & Access', servers: ['okta', 'azure-ad'] },

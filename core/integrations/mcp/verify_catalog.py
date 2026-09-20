@@ -1,0 +1,45 @@
+"""Offline packaged-catalog smoke check; never connects to vendor servers.
+
+Run with ``python -m core.integrations.mcp.verify_catalog`` inside the backend image.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
+
+def check_catalog(root: Path) -> dict:
+    from core.integrations.mcp.service import MCPService
+
+    entries = json.loads((root / "mcp-config.json").read_text())["mcpServers"]
+    expected = {name for name, value in entries.items() if isinstance(value, dict)}
+    if not expected:
+        raise RuntimeError("Packaged connector catalog is empty")
+    service = MCPService(
+        project_root=root,
+        integration_bridge=SimpleNamespace(derive_remote_mcp_env=lambda: {}),
+        detection_rules=SimpleNamespace(get_mcp_env_vars=lambda: {}),
+    )
+    actual = set(service.list_servers())
+    if actual != expected:
+        raise RuntimeError(
+            f"Catalog mismatch: missing={expected - actual}, extra={actual - expected}"
+        )
+    missing = []
+    for name, server in service.servers.items():
+        command = server.command
+        if not (Path(command).is_file() or shutil.which(command)):
+            missing.append(name)
+    return {
+        "catalog_entries": len(actual),
+        "missing_runtime_prerequisites": sorted(missing),
+    }
+
+
+if __name__ == "__main__":
+    print(
+        json.dumps(check_catalog(Path(__file__).resolve().parents[3]), sort_keys=True)
+    )

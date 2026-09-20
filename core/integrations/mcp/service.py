@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional
@@ -220,6 +221,8 @@ class MCPService:
             self.python_exe = self.venv_path / "Scripts" / "python.exe"
         else:
             self.python_exe = self.venv_path / "bin" / "python"
+        if not self.python_exe.is_file():
+            self.python_exe = Path(sys.executable)
 
         # Load enabled state (servers default to disabled)
         self._enabled_servers: Dict[str, bool] = self._load_enabled_state()
