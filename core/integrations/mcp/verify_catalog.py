@@ -38,6 +38,8 @@ def check_catalog(root: Path) -> dict:
         command = server.command
         if not (Path(command).is_file() or shutil.which(command)):
             missing.append(name)
+        elif any("git+" in arg for arg in server.args) and not shutil.which("git"):
+            missing.append(name)
     unexpected = sorted(set(missing) - NOT_SHIPPED)
     if unexpected:
         raise RuntimeError(f"Catalog entries with no launcher: {unexpected}")

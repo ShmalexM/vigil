@@ -134,6 +134,41 @@ def add_relationship(
     return rel
 
 
+def link_cases(
+    session: Session,
+    case_a: str,
+    case_b: str,
+    *,
+    relationship_type: str,
+    created_by: str,
+    notes: Optional[str] = None,
+) -> None:
+    """Link two cases both ways, skipping a direction that already has the link.
+
+    A case's relationships are read by its own case_id only, so one row would
+    show the link on one side.
+    """
+    for case_id, related in ((case_a, case_b), (case_b, case_a)):
+        exists = (
+            session.query(CaseRelationship.relationship_id)
+            .filter_by(
+                case_id=case_id,
+                related_case_id=related,
+                relationship_type=relationship_type,
+            )
+            .first()
+        )
+        if exists is None:
+            add_relationship(
+                session,
+                case_id,
+                related_case_id=related,
+                relationship_type=relationship_type,
+                created_by=created_by,
+                notes=notes,
+            )
+
+
 def list_relationships(session: Session, case_id: str) -> List[CaseRelationship]:
     return (
         session.query(CaseRelationship)

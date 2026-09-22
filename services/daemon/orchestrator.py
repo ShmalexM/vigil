@@ -105,34 +105,20 @@ def _count_queued_intake_rows() -> int:
         return session.query(IntakeTrigger).filter_by(state="queued").count()
 
 
-# Both directions: a case's relationships are read by its own case_id only, so
-# one row would show the link on one side. The daemon's pair memory is lost on
-# restart, so an existing row is not written twice.
+# related_to: the type the case screen labels and an analyst's link defaults to.
 def _link_cases(case_a: str, case_b: str, notes: str) -> None:
-    from core.cases.case_records_service import add_relationship
+    from core.cases.case_records_service import link_cases
     from core.storage.connection import get_db_manager
-    from core.storage.models import CaseRelationship
 
     with get_db_manager().session_scope() as session:
-        for case_id, related in ((case_a, case_b), (case_b, case_a)):
-            exists = (
-                session.query(CaseRelationship.relationship_id)
-                .filter_by(
-                    case_id=case_id,
-                    related_case_id=related,
-                    relationship_type="related",
-                )
-                .first()
-            )
-            if exists is None:
-                add_relationship(
-                    session,
-                    case_id,
-                    related_case_id=related,
-                    relationship_type="related",
-                    created_by=ORCHESTRATOR_ACTOR,
-                    notes=notes,
-                )
+        link_cases(
+            session,
+            case_a,
+            case_b,
+            relationship_type="related_to",
+            created_by=ORCHESTRATOR_ACTOR,
+            notes=notes,
+        )
 
 
 def lift_ai_enrichment(finding: Dict) -> Dict:
@@ -1586,7 +1572,7 @@ class Orchestrator:
                     logger.info(f"Linked cases {case_a} <-> {case_b}")
                 except Exception:
                     logger.warning(
-                        "Failed to link cases %s <-> %s", case_a, case_b, exc_info=True
+                        f"Failed to link cases {case_a} <-> {case_b}", exc_info=True
                     )
 
             cross_note = (

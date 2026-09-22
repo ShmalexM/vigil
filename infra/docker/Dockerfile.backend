@@ -61,10 +61,12 @@ FROM python:${PYTHON_VERSION}-slim AS runtime
 ARG VIGIL_VERSION=dev
 LABEL org.opencontainers.image.version="${VIGIL_VERSION}"
 
-# Runtime system deps only
+# Runtime system deps only. git: uvx installs SentinelOne from its git source
+# when it starts.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libpq5 \
       curl \
+      git \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user (matching UID/GID 1000 from podSecurityContext in Helm chart)
