@@ -94,8 +94,9 @@ def _ts_string_map(path: Path, marker: str) -> dict[str, str]:
 
 def _hidden_mcp_servers() -> set[str]:
     source = _SETTINGS_DATA.read_text()
-    assert "HIDDEN_MCP_SERVERS = new Set<string>()" in source
-    return set()
+    found = re.search(r"HIDDEN_MCP_SERVERS = new Set\(\[([^\]]+)\]\)", source)
+    assert found, "HIDDEN_MCP_SERVERS not found in integrationsData.ts"
+    return set(re.findall(r"'([A-Za-z0-9_-]+)'", found.group(1)))
 
 
 @pytest.mark.unit
@@ -174,26 +175,27 @@ def test_no_vendor_server_lives_in_the_tools_package():
 
 
 @pytest.mark.unit
-def test_frontend_server_catalog_maps_share_the_same_integration():
-    """A catalog entry can expose multiple real MCP transports (Splunk).
+def test_frontend_server_catalog_maps_are_inverses():
+    """Settings and setup keep hand-written inverses of the same aliases.
 
-    Setup picks the default; every Settings card must resolve back to that
-    integration, without hiding additional transports to force a bijection.
+    ``SERVER_TO_INTEGRATION`` (server key → catalog id) and
+    ``CATALOG_TO_SERVER`` (catalog id → server key) live in different files.
+    Elastic dropped out of one and the Settings card lost its gear.
     """
     server_to = _ts_string_map(_SETTINGS_DATA, "SERVER_TO_INTEGRATION")
     catalog_to = _ts_string_map(_DATA_SOURCE_DIALOG, "CATALOG_TO_SERVER")
-    for server, integration in server_to.items():
-        primary = catalog_to.get(integration, integration)
-        assert server_to.get(primary, primary) == integration
-    for integration, server in catalog_to.items():
-        assert server_to.get(server, server) == integration
+    assert {v: k for k, v in server_to.items()} == catalog_to, (
+        "SERVER_TO_INTEGRATION and CATALOG_TO_SERVER are not inverses: "
+        f"{server_to!r} vs {catalog_to!r}"
+    )
 
 
 @pytest.mark.unit
 def test_aliased_mcp_server_names_are_in_the_frontend_maps():
     """A descriptor whose MCP key differs from its catalog id must be mapped.
 
-    Additional transports remain visible and use their integration's configuration.
+    Hidden servers (``splunk-selfhosted``) are not Settings cards, so they
+    are not required in the 1:1 alias maps.
     """
     server_to = _ts_string_map(_SETTINGS_DATA, "SERVER_TO_INTEGRATION")
     catalog_to = _ts_string_map(_DATA_SOURCE_DIALOG, "CATALOG_TO_SERVER")
@@ -209,10 +211,7 @@ def test_aliased_mcp_server_names_are_in_the_frontend_maps():
                     f"SERVER_TO_INTEGRATION[{name!r}] is {server_to.get(name)!r}, "
                     f"expected {descriptor.id!r}"
                 )
-            if (
-                catalog_to.get(descriptor.id, descriptor.id)
-                not in descriptor.mcp_server_names
-            ):
+            if catalog_to.get(descriptor.id) != name:
                 problems.append(
                     f"CATALOG_TO_SERVER[{descriptor.id!r}] is "
                     f"{catalog_to.get(descriptor.id)!r}, expected {name!r}"
@@ -247,6 +246,8 @@ def test_atomic_red_team_mcp_config_declares_no_required_env_placeholders():
     servers = json.loads(_MCP_CONFIG.read_text())["mcpServers"]
     art = servers["atomic-red-team"]
     env = {
-        k: str(v) for k, v in (art.get("env") or {}).items() if not k.startswith("_")
+        k: str(v)
+        for k, v in (art.get("env") or {}).items()
+        if not k.startswith("_")
     }
     assert extract_required_env_vars(env, list(art.get("args") or [])) == []

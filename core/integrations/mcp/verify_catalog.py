@@ -10,6 +10,11 @@ import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
+# Entries whose launcher the image does not ship: Okta runs through docker.
+# Joe Sandbox's uv is here, but its separate install is not, and this check
+# only sees launchers.
+NOT_SHIPPED = frozenset({"okta"})
+
 
 def check_catalog(root: Path) -> dict:
     from core.integrations.mcp.service import MCPService
@@ -33,6 +38,9 @@ def check_catalog(root: Path) -> dict:
         command = server.command
         if not (Path(command).is_file() or shutil.which(command)):
             missing.append(name)
+    unexpected = sorted(set(missing) - NOT_SHIPPED)
+    if unexpected:
+        raise RuntimeError(f"Catalog entries with no launcher: {unexpected}")
     return {
         "catalog_entries": len(actual),
         "missing_runtime_prerequisites": sorted(missing),

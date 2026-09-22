@@ -104,7 +104,6 @@ class SOCDaemon:
         self._orchestrator = Orchestrator(
             self.config.orchestrator,
             approvals=approvals,
-            mcp_client=self._mcp_client,
         )
 
         if self.config.metrics.enabled:
