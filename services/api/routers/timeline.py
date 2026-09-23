@@ -293,7 +293,7 @@ async def get_timeline_range(
         events.append(
             TimelineEvent(
                 id=f"finding-{finding['finding_id']}",
-                content=f"Finding: {finding['finding_id']} - {finding.get('severity', 'unknown')}",
+                content=f"Finding: {finding['finding_id']} - {finding.get('severity') or 'unknown'}",
                 start=f_time,
                 type="finding",
                 severity=finding.get("severity"),
