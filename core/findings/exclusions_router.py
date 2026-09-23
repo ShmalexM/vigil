@@ -19,8 +19,7 @@ from core.findings.exclusions import (
     ExclusionConflict,
     ExclusionError,
     create_exclusion,
-    hidden_findings_total,
-    list_exclusions,
+    list_exclusions_with_total,
     remove_exclusion,
 )
 from core.routing import Auth, RouterMeta, UnitOfWorkSession
@@ -93,11 +92,13 @@ def get_exclusions(
 ):
     """Active exclusions, newest first; ``include_removed`` adds the history."""
     _require(current_user, "findings.read")
-    rows = list_exclusions(session, include_removed=include_removed)
+    rows, hidden_total = list_exclusions_with_total(
+        session, include_removed=include_removed
+    )
     return {
         "exclusions": rows,
         "total": len(rows),
-        "hidden_findings_total": hidden_findings_total(session),
+        "hidden_findings_total": hidden_total,
     }
 
 

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from core.findings.exclusions import cached_active_ips, excluded_ips_of
+from core.findings.exclusions import current_active_ips, excluded_ips_of
 from core.findings.source_evidence import (
     normalize_finding_source_evidence,
     project_finding_source_evidence_for_list,
@@ -142,7 +142,7 @@ def get_findings(
         sort_order=sort_order,
         exclusions=exclusions,
     )
-    active = cached_active_ips()
+    active = current_active_ips()
 
     return {
         "findings": [
@@ -176,7 +176,7 @@ def get_finding(finding_id: str):
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
     return _annotate_exclusions(
-        normalize_finding_source_evidence(finding), cached_active_ips()
+        normalize_finding_source_evidence(finding), current_active_ips()
     )
 
 

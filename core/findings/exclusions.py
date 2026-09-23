@@ -13,7 +13,8 @@ analyst excludes are known-bad externals (scanners, sinkholed C2) whose every
 finding also names one of our own hosts, so an all-addresses rule would never
 hide anything. Addresses inside bounded source-evidence records are not
 consulted -- a netflow preview names every peer in the window, and matching
-those would hide findings the analyst never looked at.
+those would hide findings the analyst never looked at. Addresses match as
+addresses, not as text: ``2001:DB8::1`` on a finding is ``2001:db8::1``.
 
 Rows and the SQL predicate are in ``core.storage.ip_exclusion_repository``.
 """
@@ -24,10 +25,11 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Mapping
-from typing import Any, Dict, FrozenSet, List, Optional
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.findings.ip_address import normalize_ip
@@ -45,11 +47,13 @@ __all__ = [
     "ExclusionError",
     "cached_active_ips",
     "create_exclusion",
+    "current_active_ips",
     "excluded_ips_of",
     "finding_ips",
     "hidden_findings_total",
     "invalidate_cache",
     "list_exclusions",
+    "list_exclusions_with_total",
     "normalize_ip",
     "remove_exclusion",
 ]
@@ -67,24 +71,34 @@ class ExclusionConflict(ExclusionError):
     """The address is already actively excluded."""
 
 
-def finding_ips(entity_context: Any) -> FrozenSet[str]:
-    """Every normalized address a finding names in its entity IP fields."""
+def _spelled_ips(entity_context: Any) -> Iterator[Tuple[str, str]]:
+    """``(as the finding spells it, normalized)`` for each address it names."""
     if not isinstance(entity_context, Mapping):
-        return frozenset()
-    found = set()
+        return
     for key in FINDING_IP_KEYS:
         value = entity_context.get(key)
         for item in value if isinstance(value, (list, tuple)) else [value]:
             ip = normalize_ip(item)
             if ip:
-                found.add(ip)
-    return frozenset(found)
+                yield item.strip(), ip
+
+
+def finding_ips(entity_context: Any) -> FrozenSet[str]:
+    """Every normalized address a finding names in its entity IP fields."""
+    return frozenset(ip for _, ip in _spelled_ips(entity_context))
 
 
 def excluded_ips_of(finding: Mapping[str, Any], active: Iterable[str]) -> List[str]:
-    """The finding's addresses that are actively excluded, sorted."""
+    """The finding's actively excluded addresses, sorted, spelled as the finding
+    spells them so the console can mark the address it shows."""
     active_set = active if isinstance(active, (set, frozenset)) else set(active)
-    return sorted(finding_ips(finding.get("entity_context")) & active_set)
+    return sorted(
+        {
+            spelled
+            for spelled, ip in _spelled_ips(finding.get("entity_context"))
+            if ip in active_set
+        }
+    )
 
 
 def serialize(
@@ -108,24 +122,36 @@ def serialize(
     return data
 
 
+def list_exclusions_with_total(
+    session: Session, *, include_removed: bool = False
+) -> Tuple[List[Dict[str, Any]], int]:
+    """:func:`list_exclusions` and :func:`hidden_findings_total` from one pass
+    over the findings table."""
+    per_ip, total = repo.count_findings_per_active_ip(session)
+    rows = [
+        serialize(row, per_ip.get(row.ip, 0) if row.removed_at is None else None)
+        for row in repo.list_rows(session, include_removed=include_removed)
+    ]
+    return rows, total
+
+
 def list_exclusions(
     session: Session, *, include_removed: bool = False, with_counts: bool = True
 ) -> List[Dict[str, Any]]:
     """Newest first. Active rows carry ``hidden_findings``: how many stored
     findings name the address, which is what removing it would bring back."""
-    out = []
-    for row in repo.list_rows(session, include_removed=include_removed):
-        count = None
-        if with_counts and row.removed_at is None:
-            count = repo.count_findings_naming(session, row.ip)
-        out.append(serialize(row, count))
-    return out
+    if not with_counts:
+        return [
+            serialize(row)
+            for row in repo.list_rows(session, include_removed=include_removed)
+        ]
+    return list_exclusions_with_total(session, include_removed=include_removed)[0]
 
 
 def hidden_findings_total(session: Session) -> int:
     """Findings the queue is hiding, each counted once -- the per-row counts
     overlap when one finding names two excluded addresses."""
-    return repo.count_hidden_findings(session)
+    return repo.count_findings_per_active_ip(session)[1]
 
 
 def _clean_reason(reason: Any, *, required: bool) -> Optional[str]:
@@ -165,8 +191,17 @@ def create_exclusion(
         created_by=created_by,
         created_at=utcnow(),
     )
-    session.add(row)
-    session.flush()
+    # Two analysts excluding the same address at once both pass the check above;
+    # the SAVEPOINT keeps the unique index's refusal from poisoning the request.
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+    except IntegrityError as e:
+        constraint = getattr(getattr(e.orig, "diag", None), "constraint_name", None)
+        if constraint != "uniq_ip_exclusions_active_ip":
+            raise
+        raise ExclusionConflict(f"{normalized} is already excluded") from e
     _invalidate_on_commit(session)
     logger.info(
         "IP exclusion %s added for %s by %s", row.exclusion_id, normalized, created_by
@@ -219,24 +254,39 @@ def _invalidate_on_commit(session: Session) -> None:
     event.listen(session, "after_commit", lambda _s: invalidate_cache(), once=True)
 
 
-def cached_active_ips() -> FrozenSet[str]:
-    """Actively excluded addresses, for callers without a session.
+def _read_active_ips() -> FrozenSet[str]:
+    from core.storage.unit_of_work import unit_of_work
 
-    Fails open to "nothing excluded" when the database cannot be read: an
-    exclusion hides findings, so failing closed would hide everything.
-    """
+    with unit_of_work() as session:
+        return frozenset(repo.active_ips(session))
+
+
+def _fail_open(e: Exception) -> FrozenSet[str]:
+    # An exclusion hides findings, so failing closed would hide everything.
+    logger.warning("Could not read IP exclusions; treating none as active: %s", e)
+    return frozenset()
+
+
+def current_active_ips() -> FrozenSet[str]:
+    """Uncached: the findings filter reads the table live, and with more than
+    one backend replica a cached label would disagree with it for a TTL."""
+    try:
+        return _read_active_ips()
+    except Exception as e:  # noqa: BLE001
+        return _fail_open(e)
+
+
+def cached_active_ips() -> FrozenSet[str]:
+    """:func:`current_active_ips` behind a short TTL. A failed read is not
+    cached."""
     global _cache, _cache_at
     with _cache_lock:
         if _cache is not None and time.monotonic() - _cache_at < _CACHE_TTL_SECONDS:
             return _cache
     try:
-        from core.storage.unit_of_work import unit_of_work
-
-        with unit_of_work() as session:
-            value = frozenset(repo.active_ips(session))
+        value = _read_active_ips()
     except Exception as e:  # noqa: BLE001
-        logger.warning("Could not read IP exclusions; treating none as active: %s", e)
-        return frozenset()
+        return _fail_open(e)
     with _cache_lock:
         _cache, _cache_at = value, time.monotonic()
     return value
