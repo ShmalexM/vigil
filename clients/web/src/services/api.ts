@@ -1040,6 +1040,8 @@ export const workflowApi = {
     hypothesis?: string
     iterations?: number
     approve_hypotheses?: boolean
+    /** consider findings naming analyst-excluded IPs too */
+    include_excluded?: boolean
   }) => api.post(`/workflows/${id}/execute`, params, { timeout: LLM_TIMEOUT }),
   // Read-only: is this report already hunted? Answers running | concluded | uncovered,
   // the last two with a `proposal` body execute() accepts as-is. Never starts anything.
@@ -1121,6 +1123,8 @@ export const orchestratorApi = {
     case_id?: string
     hypothesis?: string
     priority?: string
+    /** consider findings naming analyst-excluded IPs too */
+    include_excluded?: boolean
   }) => api.post('/orchestrator/investigations', params),
   wakeInvestigation: (id: string) => api.post(`/orchestrator/investigations/${id}/wake`),
   killInvestigation: (id: string) => api.post(`/orchestrator/investigations/${id}/kill`),

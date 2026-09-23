@@ -8,6 +8,7 @@ whole table.
 import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
+from core.findings.exclusions import cached_active_ips
 from core.memory.entity_keys import entity_context_candidates
 from core.storage.connection import get_db_manager
 from core.storage.shared_ioc_repository import SharedIOCRepository, make_key
@@ -21,12 +22,15 @@ def _keys_from_finding(finding: Dict[str, Any]) -> Set[str]:
     The spelling map is memory's (``entity_context_candidates``); the keys are
     this table's. ``make_key`` aliases ``host`` back to ``hostname`` on the way
     in, so what lands in ``shared_iocs`` is what always landed there -- and a key
-    minted in the wrong vocabulary joins against nothing.
+    minted in the wrong vocabulary joins against nothing. Analyst-excluded
+    addresses are left out, so one never ties two pieces of work together.
     """
+    exclude = cached_active_ips()
     return {
         key
         for key in (
-            make_key(kind, value) for kind, value in entity_context_candidates(finding)
+            make_key(kind, value)
+            for kind, value in entity_context_candidates(finding, exclude)
         )
         if key
     }

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RunModal } from './WorkflowsScreen'
+import { findingsApi } from '../../services/api'
 
 const execute = vi.fn(() => Promise.resolve({ data: { run_id: 'run-abc12345' } }))
 const getWorkflow = vi.fn()
@@ -394,7 +395,7 @@ describe('checking a report against what is already hunted', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reopen' }))
     expect(screen.getByLabelText(/Hypothesis/)).toHaveValue(proposal.hypothesis)
     expect(screen.getByLabelText('What H1 is about')).toHaveValue('ip:45.77.53.176')
-    expect(screen.getByRole('checkbox')).toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Ask me before it starts/ })).toBeChecked()
     expect(execute).not.toHaveBeenCalled()
   })
 
@@ -436,7 +437,7 @@ describe('checking a report against what is already hunted', () => {
 
     expect(await screen.findByText(/nothing to check: no entity keys/)).toBeInTheDocument()
     expect(screen.getByLabelText(/Hypothesis/)).toHaveValue('a host beacons')
-    expect(screen.getByRole('checkbox')).not.toBeChecked()
+    expect(screen.getByRole('checkbox', { name: /Ask me before it starts/ })).not.toBeChecked()
     expect(screen.queryByTestId('coverage-answer')).toBeNull()
   })
 
@@ -445,5 +446,34 @@ describe('checking a report against what is already hunted', () => {
     open('compose')
     await waitFor(() => expect(getWorkflow).toHaveBeenCalled())
     expect(screen.queryByLabelText(/^Report/)).toBeNull()
+  })
+})
+
+/* An analyst-excluded IP is left out of what a run searches and pursues. Including
+   it is the analyst's call per run, and the dialog says when the pick needs it. */
+describe('findings with excluded IPs', () => {
+  it('are left out unless the run is started to include them', async () => {
+    getWorkflow.mockResolvedValueOnce(limits([]))
+    open('compose')
+    fireEvent.change(await screen.findByLabelText('Context'), { target: { value: 'scanner sweep' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /Include findings with excluded IPs/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Run workflow/ }))
+
+    await waitFor(() => expect(execute).toHaveBeenCalledWith('threat-hunt', {
+      context: 'scanner sweep', include_excluded: true,
+    }))
+  })
+
+  it('warns when the picked finding names an excluded IP', async () => {
+    vi.mocked(findingsApi.getAll).mockResolvedValueOnce({
+      data: { findings: [{ finding_id: 'f-scan', severity: 'high', excluded_ips: ['203.0.113.9'] }] },
+    } as never)
+    getWorkflow.mockResolvedValueOnce(limits([]))
+    open('compose')
+    fireEvent.change(await screen.findByLabelText('Finding ID'), { target: { value: 'f-scan' } })
+
+    expect(await screen.findByText(/names an excluded IP/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: /Include findings with excluded IPs/ }))
+    expect(screen.queryByText(/names an excluded IP, so without this/)).toBeNull()
   })
 })

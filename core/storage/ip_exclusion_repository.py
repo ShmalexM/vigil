@@ -72,6 +72,11 @@ def finding_names_any(ips) -> ColumnElement[bool]:
     )
 
 
+def not_excluded() -> ColumnElement[bool]:
+    """SQL: the finding names no actively excluded address."""
+    return ~finding_names_any(active_ips_subquery())
+
+
 def exclusion_view_filter(view: str) -> Optional[ColumnElement[bool]]:
     """WHERE clause for one of :data:`EXCLUSION_VIEWS`; ``None`` means no filter."""
     if view not in EXCLUSION_VIEWS:

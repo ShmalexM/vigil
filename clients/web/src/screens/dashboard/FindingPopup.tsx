@@ -418,7 +418,7 @@ export default function FindingPopup({
                           <button
                             className="btn ghost fp-ip-exclude"
                             onClick={() => { setExcludeIp(ip); setExcludeReason(''); setExcludeError(null) }}
-                            title="Hide findings naming this address from every analyst's queue"
+                            title="Hide findings naming this address from the queue and from hunt seeds"
                           >
                             Exclude
                           </button>
@@ -452,8 +452,8 @@ export default function FindingPopup({
               </ul>
               {excludeError && <div className="field-hint err" role="alert">{excludeError}</div>}
               <p className="fp-ip-note muted">
-                Excluding hides this address’s findings from every analyst’s queue. LogLM keeps scoring them,
-                and removing the exclusion (Dashboard → Excluded IPs) brings them back unchanged.
+                Excluding hides this address’s findings from the queue and from hunt and investigation seeds. LogLM keeps
+                scoring them, and removing the exclusion (Dashboard → Excluded IPs) brings them back unchanged.
               </p>
             </div>
           )}

@@ -36,6 +36,12 @@ export interface StartRequest {
   // Entity Keys the run opens its episodic read on, minted Python-side by the one rule.
   // Optional and additive, so a job queued before the field existed still parses.
   recall_keys?: string[];
+  // Analyst-excluded `ip:` Entity Keys, fixed at enqueue. Optional and additive, like
+  // recall_keys, and journaled with the spec so a resume sees the set the run began with.
+  excluded_entities?: string[];
+  // Started to consider findings naming those IPs too; the backend then sends an empty
+  // excluded_entities, and the run's tool calls ask for excluded findings.
+  include_excluded?: boolean;
   // How many turns this run may take. Per-run for the same reason; absent leaves the
   // config's.
   iterations?: number;

@@ -17,12 +17,13 @@ class _Data:
     def __init__(self, findings=None):
         self._findings = findings or []
 
-    def get_findings(self, limit=None):
+    def get_findings(self, limit=None, exclusions="include"):
+        self.exclusions = exclusions
         return self._findings
 
 
 class _Angry:
-    def get_findings(self, limit=None):
+    def get_findings(self, limit=None, **_):
         raise RuntimeError("the database is down")
 
 
@@ -116,3 +117,10 @@ class TestWhatTheHuntIsSteeredToward:
 def test_the_legacy_ioc_tallying_is_gone():
     for dead in ("_hunt_for_iocs", "_extract_iocs", "_analyze_finding_patterns"):
         assert not hasattr(TaskScheduler, dead), f"{dead} still exists"
+
+
+def test_excluded_findings_do_not_steer_the_hunt():
+    """An analyst-excluded IP is not a lead, so its findings pick no technique."""
+    data = _Data([_finding("T1071")])
+    _scheduler(data=data)._hunt_hypothesis()
+    assert data.exclusions == "hide"

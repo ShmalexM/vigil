@@ -34,7 +34,8 @@ function evidence(view: EvidenceView): string {
 
 function entity(view: EntityView): string {
   const suppressed = view.suppressed === true ? ", called benign by an operator" : "";
-  return `- ${view.type}:${view.value} (seen ${view.count}x${suppressed})`;
+  const excluded = view.excluded === true ? ", excluded by an analyst" : "";
+  return `- ${view.type}:${view.value} (seen ${view.count}x${suppressed}${excluded})`;
 }
 
 function weakening(weakens: Digest["weakens"]): string {

@@ -47,6 +47,21 @@ def _redis_url() -> str:
     return get_settings().redis_url or DEFAULT_REDIS_URL
 
 
+# Analyst-excluded IPs as Entity Keys, fixed at enqueue so a resume reads the set the
+# run started with. include_excluded empties it; a caller's own set is left alone.
+def _with_exclusions(request: Dict[str, Any]) -> Dict[str, Any]:
+    if request.get("include_excluded") is True:
+        return {**request, "excluded_entities": []}
+    if "excluded_entities" in request:
+        return request
+    from core.findings.exclusions import cached_active_ips
+
+    return {
+        **request,
+        "excluded_entities": sorted(f"ip:{ip}" for ip in cached_active_ips()),
+    }
+
+
 # The reason="start" arm of the RunJob union in the agent layer's job contract.
 def build_start_job(
     run_id: str,
@@ -55,6 +70,7 @@ def build_start_job(
     enqueued_by: str,
     tenant_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    request = _with_exclusions(request)
     return {
         "schema_version": JOB_SCHEMA_VERSION,
         "run_id": run_id,

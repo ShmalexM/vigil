@@ -52,6 +52,17 @@ describe("a tool this process answers itself", () => {
 });
 
 describe("a tool that runs in the other process", () => {
+  // The run's standing say, beside the args: the model chooses the args, never this.
+  it("sends the run's context when it has one, and no context key when it has none", async () => {
+    const { fetch, sent } = answering({ ok: true, rows: [], rowCount: 0, capped: false, sourceSystem: "vigil" });
+    const url = "http://127.0.0.1:6987/internal/tools/invoke";
+    await remoteDispatch({ url, token: "shhh", fetch, context: { include_excluded: true } }).invoke(TOOL, {});
+    await remoteDispatch({ url, token: "shhh", fetch }).invoke(TOOL, {});
+
+    expect(((await sent[0]!.json()) as { context?: unknown }).context).toEqual({ include_excluded: true });
+    expect(await sent[1]!.json()).not.toHaveProperty("context");
+  });
+
   it("sends the tool, its arguments and its bounds", async () => {
     const { fetch, sent } = answering({ ok: true, rows: [], rowCount: 0, capped: false, sourceSystem: "vigil" });
     await dispatchTo(fetch).invoke(TOOL, { severity: "high" });

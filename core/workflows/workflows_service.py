@@ -544,6 +544,8 @@ class WorkflowsService:
                     # config's policy rather than pinning every run to this side's.
                     "approve_hypotheses": (parameters or {}).get("approve_hypotheses")
                     or None,
+                    "include_excluded": (parameters or {}).get("include_excluded")
+                    or None,
                 }
             ),
             enqueued_by=actor or triggered_by or "api",

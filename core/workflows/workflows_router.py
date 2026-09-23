@@ -67,6 +67,9 @@ class WorkflowExecuteRequest(BaseModel):
     # Whether the hunt stops and asks before it spends. The policy defaults to auto,
     # so a headless run advances with nobody at a terminal.
     approve_hypotheses: Optional[bool] = None
+    # Consider findings naming analyst-excluded IPs too. Off by default: an exclusion
+    # says the address is already known, so a run neither starts from nor pursues it.
+    include_excluded: Optional[bool] = None
 
 
 class HuntCoverageRequest(BaseModel):

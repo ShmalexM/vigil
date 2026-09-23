@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Iterable, List, Tuple
+from typing import AbstractSet, Iterable, List, Tuple
 
+from core.findings.ip_address import normalize_ip
 from core.memory.recall_contract import ENTITY_KEY_TYPES, KEY_CASE_SENSITIVE_TYPES
 from core.memory.tlds import TLDS
 
@@ -205,12 +206,18 @@ if _OFF_VOCABULARY:
     )
 
 
-def entity_context_candidates(finding: object) -> List[Tuple[str, str]]:
+def entity_context_candidates(
+    finding: object, exclude_ips: AbstractSet[str] = frozenset()
+) -> List[Tuple[str, str]]:
     """A finding's entity context as ``(type, value)`` candidates.
 
     Typed but not minted: the caller decides which vocabulary the key is spelled
     in, and there are two. Empty for a finding carrying no entity context, which
     is what keeps "nothing was asked" apart from "nothing is known".
+
+    ``exclude_ips`` are analyst-excluded addresses (``core.findings.exclusions``):
+    they are left out, so an excluded address neither keys recall nor joins a
+    finding to other work through the shared-IOC index.
     """
     context = finding.get("entity_context") if isinstance(finding, dict) else None
     if not isinstance(context, dict):
@@ -228,19 +235,28 @@ def entity_context_candidates(finding: object) -> List[Tuple[str, str]]:
         if value:
             candidates.append((kind, str(value)))
 
+    if exclude_ips:
+        candidates = [
+            (kind, value)
+            for kind, value in candidates
+            if kind != "ip" or normalize_ip(value) not in exclude_ips
+        ]
     return candidates
 
 
-def finding_entity_keys(findings: object) -> List[str]:
+def finding_entity_keys(
+    findings: object, exclude_ips: AbstractSet[str] = frozenset()
+) -> List[str]:
     """Entity Keys for the findings an investigation was opened on.
 
     The deduped union across every finding, not the first one's: an investigation
     opened over several findings is about all of them. Recall bounds itself per
     key, per kind and overall and reports what it dropped, so a wider union does
-    not mean an unbounded prefix.
+    not mean an unbounded prefix. ``exclude_ips`` as in
+    :func:`entity_context_candidates`.
     """
     return _deduped(
         entity_key(kind, value)
         for finding in (findings if isinstance(findings, list) else [])
-        for kind, value in entity_context_candidates(finding)
+        for kind, value in entity_context_candidates(finding, exclude_ips)
     )

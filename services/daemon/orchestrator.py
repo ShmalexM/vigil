@@ -81,6 +81,7 @@ except Exception:
     ) = None  # type: ignore[assignment]
 from core.agents.projections import read_projection, run_id_for
 from core.agents.queue import RUN_KINDS, build_start_job, enqueue_run
+from core.findings.exclusions import cached_active_ips
 from core.memory.entity_keys import finding_entity_keys, normalise_keys
 from core.response.approval_service import ApprovalService
 from core.response.checkpoints import raise_for_checkpoint
@@ -293,6 +294,8 @@ def _human_ask_case_title(
 # agent_events.run_id is a uuid column and would refuse the string.
 SHADOW_WORKFLOW_ID = "shadow-adjudication"
 SHADOW_HYPOTHESIS_FILE = "shadow_hypothesis.txt"
+# Options an ask set on its run, beside recall_keys.json and read back at enqueue.
+RUN_OPTIONS_FILE = "run_options.json"
 
 
 def shadow_run_id_for(investigation_id: str) -> str:
@@ -458,6 +461,7 @@ class Orchestrator:
             "reviews_completed": 0,
             "stuck_agents_killed": 0,
             "dedup_prevented": 0,
+            "excluded_skipped": 0,
             "total_cost_usd": 0.0,
         }
         self._intake_surge_active = False
@@ -657,9 +661,34 @@ class Orchestrator:
         if row.get("kind") == "detection":
             finding = self._hydrate_detection_finding(row)
             row["_finding"] = finding
+            if finding is not None and self._decline_if_excluded(
+                finding, row.get("id")
+            ):
+                return None
             if finding is not None and self._merge_if_overlaps(finding, row.get("id")):
                 return None
         return row
+
+    def _decline_if_excluded(self, finding: Dict, trigger_id: Optional[int]) -> bool:
+        """True when the finding names an analyst-excluded IP (not a run seed).
+
+        Decided rather than dropped so the intake ledger says why no run
+        opened; the finding itself is untouched and reappears if the
+        exclusion is removed. Checked before overlap so an excluded finding
+        is never merged into a live Case as new evidence either.
+        """
+        from core.findings.exclusions import cached_active_ips, excluded_ips_of
+
+        excluded = excluded_ips_of(finding, cached_active_ips())
+        if not excluded:
+            return False
+        self.stats["excluded_skipped"] += 1
+        self._decide_trigger(
+            trigger_id,
+            state="excluded",
+            reason=f"ip_excluded: {', '.join(excluded)}"[:500],
+        )
+        return True
 
     def _merge_if_overlaps(self, finding: Dict, trigger_id: Optional[int]) -> bool:
         """True when this row is not launching this tick (merged, or held).
@@ -830,6 +859,7 @@ class Orchestrator:
             findings=findings,
             # The intake is shared, so what put the item on it is the item's to say.
             trigger_type=item.get("trigger_type") or "manual",
+            include_excluded=item.get("include_excluded") is True,
             priority=item.get("priority", "medium"),
             case_id=case_id,
             mint_case=mint,
@@ -853,6 +883,7 @@ class Orchestrator:
         shutdown_event: Optional[asyncio.Event] = None,
         trigger_id: Optional[int] = None,
         document: Optional[str] = None,
+        include_excluded: bool = False,
     ):
         """Core investigation creation logic."""
         if mint_case is not None:
@@ -882,9 +913,17 @@ class Orchestrator:
         # What this run is about, so the harness's keyed read has something to ask
         # on. Written even when empty: an investigation whose findings name no
         # entity asked nothing rather than being handed keys nobody minted.
+        excluded = frozenset() if include_excluded else cached_active_ips()
         self.workdir.write_file(
-            inv_id, "recall_keys.json", json.dumps(finding_entity_keys(findings))
+            inv_id,
+            "recall_keys.json",
+            json.dumps(finding_entity_keys(findings, excluded)),
         )
+        # Read back at enqueue, like the keys: the ask said to consider excluded IPs.
+        if include_excluded:
+            self.workdir.write_file(
+                inv_id, RUN_OPTIONS_FILE, json.dumps({"include_excluded": True})
+            )
         # Beside the context and read back the same way at enqueue: what the hunt was
         # opened to test reaches its board as a hypothesis, not as prose in the brief.
         if hypothesis:
@@ -1236,6 +1275,10 @@ class Orchestrator:
                 }
             },
         }
+
+        options = self._read_sidecar_json(inv_id, RUN_OPTIONS_FILE)
+        if isinstance(options, dict) and options.get("include_excluded") is True:
+            request["include_excluded"] = True
 
         try:
             job = build_start_job(

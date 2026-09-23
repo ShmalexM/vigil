@@ -101,8 +101,9 @@ export default function ExclusionsSection({
         <div id="exclusions-body" className="exclusions-body">
           <p className="exclusions-help">
             Exclusions apply org-wide. Findings that name an excluded address are hidden from every
-            analyst&rsquo;s queue and KPIs. Nothing about the findings changes: removing an
-            exclusion brings them back as they were.
+            analyst&rsquo;s queue and KPIs, skip AI triage and automated response, and hunts and
+            investigations do not start from them unless a run is started to include them. Nothing
+            about the findings changes: removing an exclusion brings them back as they were.
           </p>
 
           <form className="exclusions-form" onSubmit={add}>

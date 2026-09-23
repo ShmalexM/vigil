@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Iterator, Optional
 from mcp.server.mcpserver import MCPServer
 
 from core.agents.projections import pack_completed_hunts, read_replay
+from core.findings.exclusions import cached_active_ips, excluded_ips_of
 from core.time import utcnow
 
 if TYPE_CHECKING:
@@ -62,10 +63,14 @@ def get_data_service():
     return _data_service
 
 
-def load_findings():
-    """Load findings from DatabaseDataService."""
+def load_findings(exclusions: str = "hide"):
+    """Load findings from DatabaseDataService.
+
+    Findings naming an analyst-excluded IP are left out unless asked for: they
+    are not leads (core.findings.exclusions).
+    """
     try:
-        return get_data_service().get_findings(limit=10000)
+        return get_data_service().get_findings(limit=10000, exclusions=exclusions)
     except Exception as e:
         logger.error(f"Error loading findings via DatabaseDataService: {e}")
         return []
@@ -78,9 +83,12 @@ def list_findings(
     cluster_id: Optional[str] = None,
     min_anomaly_score: Optional[float] = None,
     limit: int = 50,
+    include_excluded: bool = False,
 ) -> str:
+    """List findings. Those naming an analyst-excluded IP are omitted unless
+    ``include_excluded``; each returned finding carries ``excluded_ips``."""
     try:
-        findings = load_findings()
+        findings = load_findings("include" if include_excluded else "hide")
         if severity:
             findings = [f for f in findings if f.get("severity") == severity]
         if data_source:
@@ -92,7 +100,10 @@ def list_findings(
                 f for f in findings if f.get("anomaly_score", 0) >= min_anomaly_score
             ]
 
-        results = findings[:limit]
+        active = cached_active_ips()
+        results = [
+            {**f, "excluded_ips": excluded_ips_of(f, active)} for f in findings[:limit]
+        ]
         return jdump(
             {"total": len(findings), "returned": len(results), "findings": results}
         )
@@ -112,6 +123,7 @@ def get_finding(finding_id: str) -> str:
         finding = data_service.get_finding(finding_id)
 
         if finding:
+            finding["excluded_ips"] = excluded_ips_of(finding, cached_active_ips())
             return jdump(finding)
 
         return jdump({"error": f"Finding {finding_id} not found"})

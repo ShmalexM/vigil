@@ -9845,6 +9845,11 @@ export interface components {
                 [key: string]: string[];
             } | null;
             /**
+             * Include Excluded
+             * @default false
+             */
+            include_excluded: boolean;
+            /**
              * Priority
              * @default medium
              */
@@ -9862,6 +9867,10 @@ export interface components {
                 [key: string]: unknown;
             };
             bounds: components["schemas"]["Bounds"];
+            /** Context */
+            context?: {
+                [key: string]: unknown;
+            };
             /** Tool */
             tool: string;
         };
@@ -10775,6 +10784,12 @@ export interface components {
              * @description Path to the deployment config.
              */
             config: string;
+            /**
+             * Include Excluded
+             * @description Consider findings naming analyst-excluded IPs as well.
+             * @default false
+             */
+            include_excluded: boolean;
             /** Overrides */
             overrides?: {
                 [key: string]: unknown;
@@ -11478,6 +11493,8 @@ export interface components {
             hypothesis_subjects?: {
                 [key: string]: string[];
             } | null;
+            /** Include Excluded */
+            include_excluded?: boolean | null;
             /** Iterations */
             iterations?: number | null;
             /** Max Cost Usd */

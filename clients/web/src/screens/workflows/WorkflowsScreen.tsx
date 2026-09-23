@@ -762,21 +762,26 @@ export function RunModal({ wf, onStarted, onClose }: { wf: Workflow; onStarted: 
   const [hypothesis, setHypothesis] = useState('')
   const [subjects, setSubjects] = useState<Record<string, string>>({})
   const [approve, setApprove] = useState(false)
+  const [includeExcluded, setIncludeExcluded] = useState(false)
   const [iterations, setIterations] = useState('')
   const [maxCost, setMaxCost] = useState('')
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [startedId, setStartedId] = useState<string | null>(null) // watched in place, rather than closing
   const [limits, setLimits] = useState<WfLimits | null>(null)
-  const [findingOpts, setFindingOpts] = useState<{ id: string; label: string }[]>([])
+  const [findingOpts, setFindingOpts] = useState<{ id: string; label: string; excluded: boolean }[]>([])
   const [caseOpts, setCaseOpts] = useState<{ id: string; label: string }[]>([])
 
   useEffect(() => {
     let cancelled = false
     findingsApi.getAll({ limit: 50 }).then((r) => {
       if (cancelled) return
-      const list = (r.data?.findings || []) as { finding_id: string; title?: string; severity?: string }[]
-      setFindingOpts(list.map((f) => ({ id: f.finding_id, label: [f.severity, f.title].filter(Boolean).join(' · ') })))
+      const list = (r.data?.findings || []) as { finding_id: string; title?: string; severity?: string; excluded_ips?: string[] }[]
+      setFindingOpts(list.map((f) => ({
+        id: f.finding_id,
+        label: [f.severity, f.title, f.excluded_ips?.length ? 'excluded IP' : ''].filter(Boolean).join(' · '),
+        excluded: Boolean(f.excluded_ips?.length),
+      })))
     }).catch(() => {})
     casesApi.getAll().then((r) => {
       if (cancelled) return
@@ -817,7 +822,11 @@ export function RunModal({ wf, onStarted, onClose }: { wf: Workflow; onStarted: 
     ...(isHuntLike && !turnsBad && iterations.trim() && { iterations: turns }),
     ...(isHuntLike && !costBad && maxCost.trim() && { max_cost_usd: cost }),
     ...(isHuntLike && approve && { approve_hypotheses: true }),
+    ...(includeExcluded && { include_excluded: true }),
   }
+  // Picking a finding that names an excluded IP is a reason to include them, not
+  // something to decide for the analyst: the run would otherwise not pursue it.
+  const pickedExcluded = findingOpts.some((f) => f.id === findingId.trim() && f.excluded)
   // Checked on Run, not per keystroke: a button dead through a sentence reads as an argument.
   const needsHypothesis = isHuntLike && hypothesis.trim() === ''
   const canRun = Object.keys(params).length > 0 && !turnsBad && !costBad && !starting
@@ -923,6 +932,23 @@ export function RunModal({ wf, onStarted, onClose }: { wf: Workflow; onStarted: 
             </span>
           </label>
         )}
+        <label className="flex items-start gap-2 text-[12.5px] leading-[1.5] text-tx-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={includeExcluded}
+            onChange={(e) => setIncludeExcluded(e.target.checked)}
+          />
+          <span>
+            Include findings with excluded IPs. Excluded addresses are normally left out of what
+            the run searches and pursues, because an analyst marked them as already known.
+            {pickedExcluded && !includeExcluded && (
+              <strong className="block text-tx">
+                The finding you picked names an excluded IP, so without this the run will not pursue that address.
+              </strong>
+            )}
+          </span>
+        </label>
         <div className="flex justify-end gap-2.5 pt-1">
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={!canRun} style={{ opacity: canRun ? 1 : 0.5 }} onClick={run}>

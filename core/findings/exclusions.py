@@ -7,6 +7,11 @@ severity and status; removing the exclusion shows them again unchanged.
 Exclusions are org-wide: a Vigil deployment is one organisation, and every
 analyst's queue hides the same addresses.
 
+What an exclusion stops is the work that follows ingest: the daemon spends no AI
+triage on an excluded finding, evaluates no response for it and opens no
+investigation from it, and agent runs do not pursue excluded addresses. An
+analyst can start a run that considers them anyway (``include_excluded``).
+
 A finding is *excluded* when any address among its top-level entity IP fields
 (``FINDING_IP_KEYS``) is actively excluded. Any, not all: the addresses an
 analyst excludes are known-bad externals (scanners, sinkholed C2) whose every
@@ -24,7 +29,9 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, FrozenSet, List, Optional
 
 from sqlalchemy import event
@@ -45,9 +52,11 @@ __all__ = [
     "ExclusionError",
     "cached_active_ips",
     "create_exclusion",
+    "excluded_are_included",
     "excluded_ips_of",
     "finding_ips",
     "hidden_findings_total",
+    "including_excluded",
     "invalidate_cache",
     "list_exclusions",
     "normalize_ip",
@@ -240,3 +249,22 @@ def cached_active_ips() -> FrozenSet[str]:
     with _cache_lock:
         _cache, _cache_at = value, time.monotonic()
     return value
+
+
+# Set for the length of one agent tool call when the run it serves was started with
+# ``include_excluded``: an analyst asked that investigation to consider everything.
+_INCLUDE_EXCLUDED: ContextVar[bool] = ContextVar("include_excluded", default=False)
+
+
+@contextmanager
+def including_excluded(flag: bool) -> Iterator[None]:
+    """Within the block, finding reads made for an agent include excluded ones."""
+    token = _INCLUDE_EXCLUDED.set(bool(flag))
+    try:
+        yield
+    finally:
+        _INCLUDE_EXCLUDED.reset(token)
+
+
+def excluded_are_included() -> bool:
+    return _INCLUDE_EXCLUDED.get()

@@ -1,5 +1,6 @@
 import { callsPerIteration, DEFAULT_BUDGETS, type Budgets, type Entity } from "./types.js";
 import { fromText, key, parseKey } from "./entities.js";
+import { excludedEntities } from "../../core/exclusions.js";
 import { SpecError, type Counts, type RunSpec } from "../../core/spec.js";
 import { checkpointsFrom, DEFAULT_CHECKPOINTS, type Checkpoints } from "./checkpoints.js";
 
@@ -234,5 +235,6 @@ export function recallKeysOf(spec: HuntSpec): readonly string[] {
   const declared = spec.operator_hypotheses.flatMap((statement) => spec.operator_hypothesis_subjects[statement] ?? []);
   const named = () => [...spec.operator_hypotheses, ...spec.hypotheses].flatMap((statement) => fromText(statement));
   const held = declared.length > 0 ? declared : named();
-  return [...new Set(held.map(key))].sort();
+  const excluded = excludedEntities(spec);
+  return [...new Set(held.map(key))].filter((one) => !excluded.has(one)).sort();
 }

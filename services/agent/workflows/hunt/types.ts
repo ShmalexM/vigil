@@ -425,6 +425,8 @@ export interface EntityView {
   // An operator called it known-benign. Annotated rather than hidden: the
   // records that mention it are untouched, and a hunt that silently dropped an
   suppressed?: boolean;
+  // On Vigil's exclusion list: known already, so context and never a lead.
+  excluded?: boolean;
 }
 
 // A raw payload the lead asked for by id. Rendered delimited, like all evidence.

@@ -252,7 +252,8 @@ class TaskScheduler:
         if not self._data_service:
             return ""
         try:
-            findings = self._data_service.get_findings(limit=500)
+            # Analyst-excluded IPs are not a lead, so their findings do not steer.
+            findings = self._data_service.get_findings(limit=500, exclusions="hide")
         except Exception:  # noqa: BLE001 -- a hunt with no steer is still a hunt
             logger.exception("could not read findings to steer the scheduled hunt")
             return ""

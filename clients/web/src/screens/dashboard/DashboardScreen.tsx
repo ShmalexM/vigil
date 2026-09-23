@@ -261,7 +261,7 @@ function FindingsTab({ openChat, goSettings }: Pick<ConsoleScreenProps, 'openCha
         <div className="exclusions-banner" role="status">
           <Icon name="eye" size={14} />
           {exView === 'only'
-            ? 'Showing only findings that name an excluded IP. They stay out of the queue and KPIs.'
+            ? 'Showing only findings that name an excluded IP. They stay out of the queue, KPIs and hunt seeds.'
             : 'Showing excluded findings alongside the queue. Rows marked “excluded” name an excluded IP.'}
           <button className="btn ghost" onClick={() => setExView('hide')}>Hide them</button>
         </div>

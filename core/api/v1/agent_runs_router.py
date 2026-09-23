@@ -51,6 +51,10 @@ class StartRunRequest(BaseModel):
     prompt: str = Field(default="", description="What the run is being asked to do.")
     overrides: Optional[Dict[str, Any]] = None
     tenant_id: Optional[str] = None
+    include_excluded: bool = Field(
+        default=False,
+        description="Consider findings naming analyst-excluded IPs as well.",
+    )
 
 
 class StartRunResponse(BaseModel):
@@ -133,6 +137,8 @@ async def start_run(request: StartRunRequest) -> StartRunResponse:
     }
     if request.overrides is not None:
         payload["overrides"] = request.overrides
+    if request.include_excluded:
+        payload["include_excluded"] = True
 
     # Best-effort: without a workflow_runs row a parked run cannot raise an
     # answerable checkpoint. Like every write to that table, the ledger is truth.

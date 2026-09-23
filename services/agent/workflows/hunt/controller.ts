@@ -18,6 +18,7 @@ import {
 } from "./checkpoints.js";
 import { BudgetRefused, LeadParked } from "./adapters.js";
 import { GatewayExhausted } from "../../core/limiter.js";
+import { excludedEntities } from "../../core/exclusions.js";
 import { buildDigest, focusOf, rankFrontier, suppressedEntities } from "./digest.js";
 import { buildEntityGraph, entitiesOf, fromText, key } from "./entities.js";
 import { drain, grantOf, journalNote, peek } from "./inbox.js";
@@ -352,6 +353,12 @@ function validateFocus(decision: Decision, projection: Projection): void {
   // An operator's known-benign call is an authorization, so it binds the Hunt
   // Lead rather than merely nudging it: the digest can drop a suppressed entity
   if (target !== undefined && target !== null && OPENS_WORK.has(decision.action)) {
+    if (excludedEntities(projection.hunt.spec).has(target)) {
+      throw new InvalidDecision(
+        `An analyst excluded ${target} in Vigil as already known, so the hunt opens no new work on it. ` +
+          "Pursue another entity; its records stay in the evidence as context.",
+      );
+    }
     const actor = suppressedEntities(projection).get(target);
     if (actor !== undefined) {
       throw new InvalidDecision(
@@ -1946,8 +1953,11 @@ export class HuntController {
       // An operator called it known-benign, so the hunt stops spending on it —
       // enrichment is the cheapest place that shows, and the records already
       const suppressed = suppressedEntities(this.ledger.projection);
+      const excluded = excludedEntities(this.ledger.projection.hunt.spec);
       const fresh = new Map(frontier.map((entity) => [key(entity), entity] as const));
-      const pending = [...fresh].filter(([id]) => !done.has(id) && !suppressed.has(id)).slice(0, max_entities);
+      const pending = [...fresh]
+        .filter(([id]) => !done.has(id) && !suppressed.has(id) && !excluded.has(id))
+        .slice(0, max_entities);
       if (pending.length === 0) break;
 
       const records = (await Promise.all(pending.map(([, entity]) => enricher(entity)))).flat();

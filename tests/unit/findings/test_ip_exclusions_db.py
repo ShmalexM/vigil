@@ -374,3 +374,28 @@ def test_dashboard_timeline_hides_excluded_findings():
     ids = {e.get("metadata", {}).get("finding_id") for e in response.json()["events"]}
     assert "ipx-other" in ids
     assert "ipx-scalar" not in ids and "ipx-list" not in ids
+
+
+# --- work after ingest ----------------------------------------------------------
+
+
+def test_the_enrichment_backfill_skips_excluded_findings():
+    """Never triaged, so left in they would hold the oldest slots of every batch."""
+    _standard_findings()
+    service = DatabaseService()
+
+    def backlog():
+        return {
+            f["finding_id"]
+            for f in service.get_findings_missing_enrichment(limit=100_000)
+            if f["finding_id"].startswith("ipx-")
+        }
+
+    everything = backlog()
+    assert {"ipx-scalar", "ipx-list", "ipx-other"} <= everything
+    row = _exclude()
+    assert backlog() == everything - {"ipx-scalar", "ipx-list"}
+    with unit_of_work() as session:
+        ex.remove_exclusion(session, row["exclusion_id"], removed_by="analyst-2")
+    # Restored, they are owed their triage again.
+    assert backlog() == everything

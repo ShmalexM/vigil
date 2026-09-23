@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from core.exceptions import default_on_error
 from core.storage.case_repository import CaseRepository
 from core.storage.connection import get_db_manager
-from core.storage.ip_exclusion_repository import exclusion_view_filter
+from core.storage.ip_exclusion_repository import exclusion_view_filter, not_excluded
 from core.storage.models import (
     AIDecisionLog,
     Case,
@@ -319,6 +319,9 @@ class DatabaseService:
             if max_age_hours:
                 cutoff = utcnow() - timedelta(hours=max_age_hours)
                 query = query.where(Finding.timestamp >= cutoff)
+            # Excluded findings are never triaged, so left in they would hold the
+            # oldest slots of every batch and starve the rest of the backlog.
+            query = query.where(not_excluded())
             query = query.order_by(Finding.timestamp.asc()).limit(limit)
             return FindingSchema.dump_many(session.execute(query).scalars().all())
 

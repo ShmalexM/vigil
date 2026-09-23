@@ -66,6 +66,9 @@ class InvestigationCreateRequest(BaseModel):
     # and onto the Case as evidence when the ask has one. The cap is the only
     # check, and it is sized for a pasted report.
     document: Optional[str] = Field(None, max_length=65_536)
+    # Consider findings naming analyst-excluded IPs as well; see
+    # core.findings.exclusions. Off by default.
+    include_excluded: bool = False
 
 
 # ---- Status & Control ----
@@ -492,6 +495,8 @@ async def create_investigation(request: InvestigationCreateRequest):
         }
         if request.document:
             payload["document"] = request.document
+        if request.include_excluded:
+            payload["include_excluded"] = True
 
         insert_intake_trigger(
             kind="human_ask",
@@ -525,6 +530,7 @@ async def scan_existing_findings(request: ScanFindingsRequest):
     """
     try:
         from core.storage.connection import get_db_manager
+        from core.storage.ip_exclusion_repository import not_excluded
         from core.storage.models import Finding, Investigation
 
         skipped_existing = 0
@@ -535,9 +541,12 @@ async def scan_existing_findings(request: ScanFindingsRequest):
                 for tid in inv.trigger_ids or []:
                     already_investigated.add(tid)
 
+            # Not findings naming an analyst-excluded IP: intake would decline
+            # each one, so queueing them is only noise in the ledger.
             findings = (
                 session.query(Finding)
                 .filter(Finding.severity.in_(request.severities))
+                .filter(not_excluded())
                 .order_by(Finding.timestamp.desc())
                 .all()
             )

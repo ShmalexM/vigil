@@ -7,6 +7,7 @@ import type { Harness } from "./core/loop.js";
 import { nullMemory } from "./core/memory.js";
 import { httpRecall } from "./core/recall.js";
 import { registryOf } from "./core/registry.js";
+import { toolContext } from "./core/exclusions.js";
 import { remoteDispatch } from "./core/remote.js";
 import type { Memory, State } from "./core/seams.js";
 import type { RunSpec } from "./core/spec.js";
@@ -79,7 +80,7 @@ export function harnessFor<K extends Record<string, unknown>>(
     // model's name priced a paid "llama" on a commercial host at $0.
     provider: openAiSurface(client, spec.model, limiter, spec.provider ?? "bifrost", wireModel(spec)),
     registry: registryOf(toolsFrom(spec.tools), grantsFor(kind, spec)),
-    dispatch: remoteDispatch({ url: tools, token: internalToken() }),
+    dispatch: remoteDispatch({ url: tools, token: internalToken(), context: toolContext(spec) }),
     budget: budgetOf(spec.budgets, unmeteredQuota, Date.now, seed, prices),
     // Wrapped rather than replaced: whatever the caller passed still answers the
     // cue-shaped recall, and the keyed read is added over the same endpoint the

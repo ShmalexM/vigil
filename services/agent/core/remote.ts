@@ -5,6 +5,8 @@ export interface RemoteOptions {
   url: string;
   token: string;
   fetch?: typeof globalThis.fetch;
+  // The run's standing say on every call, beside the args the model chose.
+  context?: Record<string, unknown>;
 }
 
 const FAILURE_KINDS = new Set(["invalid_args", "refused", "timeout", "unavailable", "backend_error"]);
@@ -86,6 +88,7 @@ export function remoteDispatch(options: RemoteOptions): ToolDispatch {
               tool: tool.id,
               args,
               bounds: { max_rows: tool.bounds.maxRows, timeout_ms: tool.bounds.timeoutMs },
+              ...(options.context === undefined ? {} : { context: options.context }),
             }),
             signal: held.signal,
           });

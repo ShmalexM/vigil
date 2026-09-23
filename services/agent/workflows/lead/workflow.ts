@@ -7,6 +7,7 @@ import { commitTurn, type Harness, type Outcome, type TurnConfig } from "../../c
 import { drain, streamTurn } from "../../core/stream.js";
 import { SpecError, type RoleSpec, type RunSpec } from "../../core/spec.js";
 import { topologyFor, type Assignment, type Round } from "../../core/topology.js";
+import { excludedEntities, exclusionNote } from "../../core/exclusions.js";
 
 // What every arch's lead emits. Everything past action is arch-specific and read
 // only when the arch declared it, so one loop drives a swarm and a single lead.
@@ -192,18 +193,21 @@ function turnFor(options: LeadOptions, role: string, spec: RoleSpec, task: strin
 function openingKeys(spec: RunSpec): readonly string[] {
   const held = spec.sections["recall_keys"];
   if (!Array.isArray(held)) return [];
-  return [...new Set(held.filter((key): key is string => typeof key === "string" && key !== ""))].sort();
+  const excluded = excludedEntities(spec);
+  return [...new Set(held.filter((key): key is string => typeof key === "string" && key !== "" && !excluded.has(key)))].sort();
 }
 
 // The playbook's half, rendered once: what this run is about and what an analyst
 // should know. The fold that replaces it with a digest is a later slice.
 function brief(spec: RunSpec): string {
   const objectives = spec.objectives.map((line) => `- ${line}`).join("\n");
+  const excluded = excludedEntities(spec);
   const parts = [
     `Run: ${spec.name}`,
     spec.prompt && `## What this run is about\n\n${spec.prompt}`,
     objectives && `Objectives:\n${objectives}`,
     spec.narrative,
+    excluded.size > 0 && `## Excluded by an analyst\n\n${exclusionNote(excluded)}`,
   ];
   return parts.filter((part) => part).join("\n\n");
 }

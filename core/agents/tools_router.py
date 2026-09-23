@@ -14,6 +14,7 @@ from core.agents.internal_auth import authorise
 from core.agents.mcp_tools import MCPFailure, execute_mcp_tool, split_tool_name
 from core.agents.tool_registry import MANIFEST, execute_backend_tool
 from core.deps import provide_mcp_registry
+from core.findings.exclusions import including_excluded
 from core.integrations.mcp.registry import MCPRegistry
 from core.routing import Auth, RouterMeta
 
@@ -42,6 +43,8 @@ class InvokeRequest(BaseModel):
     tool: str
     args: Dict[str, Any] = Field(default_factory=dict)
     bounds: Bounds
+    # What the run says about every call it makes, never the model's to choose.
+    context: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _failure(kind: str, **detail: Any) -> Dict[str, Any]:
@@ -172,9 +175,10 @@ async def _run(body: InvokeRequest, registry: MCPRegistry) -> Tuple[Any, bool, s
     seconds = body.bounds.timeout_ms / 1000
     args = _bounded(body.args, body.bounds.max_rows, body.tool, registry)
 
-    result, handled = await asyncio.wait_for(
-        execute_backend_tool(body.tool, args), timeout=seconds
-    )
+    with including_excluded(body.context.get("include_excluded") is True):
+        result, handled = await asyncio.wait_for(
+            execute_backend_tool(body.tool, args), timeout=seconds
+        )
     if handled:
         return result, True, SOURCE_SYSTEM
     result, handled = await asyncio.wait_for(

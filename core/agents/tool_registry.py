@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from core.agents.projections import pack_completed_hunts, read_replay
+from core.findings.exclusions import (
+    cached_active_ips,
+    excluded_are_included,
+    excluded_ips_of,
+)
 from core.memory.recall_contract import RECALL_TOOL
 from core.skills.skill_library import READ_SKILL_TOOL, read_skill
 
@@ -46,6 +51,11 @@ def _page(data: Any, args: Args, *, search: bool) -> Args:
         filters["search_query"] = args.get("query", "")
     limit = args.get("limit", 20)
     offset = args.get("offset", 0)
+    # Analyst-excluded IPs are not a lead unless the run was started to include
+    # them; the count says what was withheld.
+    include = excluded_are_included()
+    withheld = 0 if include else data.count_findings(**filters, exclusions="only")
+    filters["exclusions"] = "include" if include else "hide"
     total = data.count_findings(**filters)
     findings = data.get_findings(
         limit=limit,
@@ -61,7 +71,20 @@ def _page(data: Any, args: Args, *, search: bool) -> Args:
         "has_more": (offset + limit) < total,
         "findings": [_compact(f) for f in findings],
     }
+    if withheld:
+        page["excluded_by_analyst"] = withheld
     return {"query": filters["search_query"], **page} if search else page
+
+
+def _queue_view() -> str:
+    return "include" if excluded_are_included() else "hide"
+
+
+def _get_finding(data: Any, args: Args) -> Any:
+    finding = data.get_finding(**args)
+    if isinstance(finding, dict):
+        finding["excluded_ips"] = excluded_ips_of(finding, cached_active_ips())
+    return finding
 
 
 def _findings_stats(data: Any, args: Args) -> Args:
@@ -70,7 +93,7 @@ def _findings_stats(data: Any, args: Args) -> Args:
         "by_data_source": {},
         "by_status": {},
     }
-    findings = data.get_findings(limit=10000)
+    findings = data.get_findings(limit=10000, exclusions=_queue_view())
     for finding in findings:
         for key, field in (
             ("by_severity", "severity"),
@@ -153,7 +176,7 @@ def _technique_rollup(data: Any, args: Args) -> Args:
     floor = args.get("min_confidence", 0.0)
     counts: Dict[str, int] = {}
     severities: Dict[str, Dict[str, int]] = {}
-    for finding in data.get_findings(limit=1000):
+    for finding in data.get_findings(limit=1000, exclusions=_queue_view()):
         for technique in finding.get("predicted_techniques", []) or []:
             tid = technique.get("technique_id")
             if not tid or technique.get("confidence", 0) < floor:
@@ -180,7 +203,7 @@ _DATA_TOOLS: Dict[str, Callable[[Any, Args], Any]] = {
     "list_findings": lambda data, args: _page(data, args, search=False),
     "search_findings": lambda data, args: _page(data, args, search=True),
     "get_findings_stats": _findings_stats,
-    "get_finding": lambda data, args: data.get_finding(**args),
+    "get_finding": _get_finding,
     "list_cases": _list_cases,
     "get_case": lambda data, args: data.get_case(**args),
     "create_case": _create_case,

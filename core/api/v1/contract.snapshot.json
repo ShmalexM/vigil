@@ -2326,6 +2326,12 @@
             "title": "Config",
             "type": "string"
           },
+          "include_excluded": {
+            "default": false,
+            "description": "Consider findings naming analyst-excluded IPs as well.",
+            "title": "Include Excluded",
+            "type": "boolean"
+          },
           "overrides": {
             "anyOf": [
               {

@@ -53,6 +53,8 @@ export interface SpecOverrides {
   // The playbook's standing brief and the job's own, which startHunt joins.
   narrative?: string;
   prompt?: string;
+  // Raw sections the worker lays onto the spec, e.g. excluded_entities from the job.
+  sections?: Record<string, unknown>;
 }
 
 // Built as an object rather than parsed from three files: the loader has its own
@@ -60,7 +62,7 @@ export interface SpecOverrides {
 export function huntSpecFor(overrides: SpecOverrides = {}): HuntSpec {
   const hypotheses = overrides.hypotheses ?? ["a credential is used from new infrastructure"];
   return {
-    sections: {},
+    sections: overrides.sections ?? {},
     model: "scripted",
     budgets: overrides.budgets ?? DEFAULT_BUDGETS,
     runtime: DEFAULT_RUNTIME,

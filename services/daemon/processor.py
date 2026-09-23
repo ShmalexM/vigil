@@ -5,6 +5,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.findings.exclusions import cached_active_ips, excluded_ips_of
 from core.time import utcnow
 from services.daemon.config import ProcessingConfig, ResponseConfig
 from services.daemon.probes import PROBE_DATA_SOURCE
@@ -70,6 +71,7 @@ class FindingProcessor:
             "queued_for_response": 0,
             "queued_for_investigation": 0,
             "sanitization_flagged": 0,
+            "excluded_skipped": 0,
         }
 
     def _sanitize_finding(self, finding: Dict[str, Any], source: Optional[str]) -> None:
@@ -309,6 +311,20 @@ class FindingProcessor:
         is capped by the semaphore and short-circuited by the breaker; response
         evaluation always runs on whatever severity we have."""
         finding_id = finding.get("finding_id", "unknown")
+
+        # An analyst excluded one of its addresses (core.findings.exclusions): it is
+        # stored and searchable, but spends no triage, draws no response and opens no
+        # investigation. A known-answer probe is exempt; it exists to exercise triage.
+        if finding.get("data_source") != PROBE_DATA_SOURCE:
+            excluded = excluded_ips_of(finding, cached_active_ips())
+            if excluded:
+                self.stats["excluded_skipped"] += 1
+                logger.info(
+                    "Skipping triage and response for %s: excluded IP %s",
+                    finding_id,
+                    ", ".join(excluded),
+                )
+                return
 
         want_llm = self.config.auto_triage_enabled or self.config.auto_enrich_enabled
         if want_llm and time.monotonic() >= self._enrich_paused_until:
