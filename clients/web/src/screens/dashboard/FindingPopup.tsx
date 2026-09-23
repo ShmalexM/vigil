@@ -388,7 +388,7 @@ export default function FindingPopup({
             </div>
           )}
 
-          {(ec.hostnames?.length || ec.usernames?.length) && (
+          {!!(ec.hostnames?.length || ec.usernames?.length) && (
             <div className="modal-section">
               <h4>Entities</h4>
               <div className="fp-entities">
