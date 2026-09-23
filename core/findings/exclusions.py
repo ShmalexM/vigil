@@ -13,8 +13,7 @@ analyst excludes are known-bad externals (scanners, sinkholed C2) whose every
 finding also names one of our own hosts, so an all-addresses rule would never
 hide anything. Addresses inside bounded source-evidence records are not
 consulted -- a netflow preview names every peer in the window, and matching
-those would hide findings the analyst never looked at. Addresses match as
-addresses, not as text: ``2001:DB8::1`` on a finding is ``2001:db8::1``.
+those would hide findings the analyst never looked at.
 
 Rows and the SQL predicate are in ``core.storage.ip_exclusion_repository``.
 """
@@ -25,7 +24,7 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from sqlalchemy import event
@@ -71,34 +70,24 @@ class ExclusionConflict(ExclusionError):
     """The address is already actively excluded."""
 
 
-def _spelled_ips(entity_context: Any) -> Iterator[Tuple[str, str]]:
-    """``(as the finding spells it, normalized)`` for each address it names."""
+def finding_ips(entity_context: Any) -> FrozenSet[str]:
+    """Every normalized address a finding names in its entity IP fields."""
     if not isinstance(entity_context, Mapping):
-        return
+        return frozenset()
+    found = set()
     for key in FINDING_IP_KEYS:
         value = entity_context.get(key)
         for item in value if isinstance(value, (list, tuple)) else [value]:
             ip = normalize_ip(item)
             if ip:
-                yield item.strip(), ip
-
-
-def finding_ips(entity_context: Any) -> FrozenSet[str]:
-    """Every normalized address a finding names in its entity IP fields."""
-    return frozenset(ip for _, ip in _spelled_ips(entity_context))
+                found.add(ip)
+    return frozenset(found)
 
 
 def excluded_ips_of(finding: Mapping[str, Any], active: Iterable[str]) -> List[str]:
-    """The finding's actively excluded addresses, sorted, spelled as the finding
-    spells them so the console can mark the address it shows."""
+    """The finding's addresses that are actively excluded, sorted."""
     active_set = active if isinstance(active, (set, frozenset)) else set(active)
-    return sorted(
-        {
-            spelled
-            for spelled, ip in _spelled_ips(finding.get("entity_context"))
-            if ip in active_set
-        }
-    )
+    return sorted(finding_ips(finding.get("entity_context")) & active_set)
 
 
 def serialize(

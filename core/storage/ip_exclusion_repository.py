@@ -13,19 +13,14 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import (
     ColumnElement,
     Text,
-    and_,
-    any_,
-    case,
     cast,
     distinct,
-    exists,
+    false,
     func,
-    literal,
-    null,
+    or_,
     select,
-    true,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONPATH
+from sqlalchemy.dialects.postgresql import ARRAY, array
 from sqlalchemy.orm import Session
 
 from core.storage.models import Finding, IpExclusion
@@ -72,55 +67,22 @@ def active_ips_subquery():
     )
 
 
-# Every string under a FINDING_IP_KEYS key; lax [*] reads a lone string as a
-# one-element list, so both shapes the keys hold come out the same way.
-_FINDING_IP_PATH = (
-    "lax $.keyvalue() ? ("
-    + " || ".join(f'@.key == "{key}"' for key in FINDING_IP_KEYS)
-    + ').value[*] ? (@.type() == "string")'
-)
-
-# What normalize_ip strips before parsing, so both sides read the same text.
-_IP_TRIM = " \t\n\r[]"
-
-
-def _ip_values():
-    return func.jsonb_path_query(
-        Finding.entity_context,
-        cast(literal(_FINDING_IP_PATH, Text), JSONPATH),
-        func.jsonb_build_object(),
-        true(),
-    )
-
-
-def _as_address(value) -> ColumnElement:
-    """As ``inet``, not text: ingest keeps the source's spelling, so
-    ``2001:DB8::1`` must still match the ``2001:db8::1`` an exclusion stores.
-    The CASE keeps a hostname or CIDR away from the cast so it cannot fail the
-    query; those come out NULL and match nothing."""
-    text_value = func.btrim(value.op("#>>")(cast([], ARRAY(Text))), _IP_TRIM)
-    return case(
-        (
-            and_(
-                func.pg_input_is_valid(text_value, "inet"),
-                func.strpos(text_value, "/") == 0,
-            ),
-            cast(text_value, INET),
-        ),
-        else_=null(),
+def _names_any(entity_context, ips) -> ColumnElement[bool]:
+    return func.coalesce(
+        or_(*(entity_context[key].op("?|")(ips) for key in FINDING_IP_KEYS)),
+        false(),
     )
 
 
 def finding_names_any(ips) -> ColumnElement[bool]:
-    """SQL: the finding names any of ``ips`` (a ``text[]`` of addresses).
+    """SQL: the finding names any of ``ips`` (a ``text[]`` expression).
 
-    EXISTS is never NULL, so a finding without entity context lands in the
-    hidden view rather than in neither.
+    ``jsonb ?| text[]`` matches a string scalar and the string elements of an
+    array, the two shapes :data:`FINDING_IP_KEYS` hold. Coalesced so a finding
+    without entity context is false rather than NULL: ``NOT NULL`` would drop it
+    from the hidden view as well.
     """
-    value = _ip_values().column_valued("value")
-    return exists(
-        select(literal(1)).where(_as_address(value) == any_(cast(ips, ARRAY(INET))))
-    )
+    return _names_any(Finding.entity_context, ips)
 
 
 def exclusion_view_filter(view: str) -> Optional[ColumnElement[bool]]:
@@ -134,15 +96,12 @@ def exclusion_view_filter(view: str) -> Optional[ColumnElement[bool]]:
 
 
 def count_findings_per_active_ip(session: Session) -> Tuple[Dict[str, int], int]:
-    """``({address: findings naming it}, findings naming any)`` in one pass.
+    """``({address: findings naming it}, findings naming any)`` in one scan:
+    the per-address join only sees findings that already name an exclusion.
     ROLLUP adds the total as the row whose address is NULL."""
-    values = _ip_values().table_valued("value").render_derived("ip_values").lateral()
-    named = (
-        select(
-            Finding.finding_id.label("finding_id"),
-            _as_address(values.c.value).label("address"),
-        )
-        .join(values, true())
+    hidden = (
+        select(Finding.finding_id, Finding.entity_context)
+        .where(finding_names_any(active_ips_subquery()))
         .subquery()
     )
     active = (
@@ -151,8 +110,13 @@ def count_findings_per_active_ip(session: Session) -> Tuple[Dict[str, int], int]
         .subquery()
     )
     rows = session.execute(
-        select(active.c.ip, func.count(distinct(named.c.finding_id)))
-        .select_from(named.join(active, named.c.address == cast(active.c.ip, INET)))
+        select(active.c.ip, func.count(distinct(hidden.c.finding_id)))
+        .select_from(
+            hidden.join(
+                active,
+                _names_any(hidden.c.entity_context, array([cast(active.c.ip, Text)])),
+            )
+        )
         .group_by(func.rollup(active.c.ip))
     ).all()
     per_ip = {ip: count for ip, count in rows if ip is not None}

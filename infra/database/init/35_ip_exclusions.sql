@@ -20,9 +20,8 @@
 CREATE TABLE IF NOT EXISTS ip_exclusions (
     exclusion_id VARCHAR(50) PRIMARY KEY,
 
-    -- Canonical text form (Python's ipaddress: lower-case, compressed IPv6).
-    -- Findings are matched against it as inet, so however a source spelled the
-    -- address in entity_context, the same address matches.
+    -- Canonical text form (Python's ipaddress: lower-case, compressed IPv6), so
+    -- it compares equal to the address as ingest writes it into entity_context.
     ip VARCHAR(45) NOT NULL,
 
     -- Why the analyst is hiding it. Required: an exclusion nobody can explain
