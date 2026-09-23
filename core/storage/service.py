@@ -202,6 +202,7 @@ class DatabaseService:
         sort_order: str = "desc",
         timestamp_start: Optional[datetime] = None,
         timestamp_end: Optional[datetime] = None,
+        dated_only: bool = False,
     ) -> List[Finding]:
         """
         Get findings with optional filters, search, and pagination.
@@ -217,6 +218,7 @@ class DatabaseService:
             offset: Offset for pagination
             sort_by: Column to sort by (timestamp, anomaly_score, severity)
             sort_order: Sort direction (asc, desc)
+            dated_only: leave out findings whose source gave no timestamp
 
         Returns:
             List of Finding objects
@@ -239,6 +241,8 @@ class DatabaseService:
                 filters.append(Finding.timestamp >= timestamp_start)
             if timestamp_end is not None:
                 filters.append(Finding.timestamp <= timestamp_end)
+            if dated_only:
+                filters.append(Finding.timestamp.isnot(None))
             if search_query:
                 from sqlalchemy import String, cast
 

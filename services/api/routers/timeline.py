@@ -363,15 +363,20 @@ async def get_cluster_timeline(cluster_id: str):
     """
     data_service = DatabaseDataService()
 
-    # Get findings in cluster. Filtered by the query, so undated findings, which
-    # ``timestamp DESC`` returns first, cannot fill the page ahead of the
-    # cluster's own.
-    all_findings = data_service.get_findings(limit=1000, cluster_id=cluster_id)
+    def in_cluster(page: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Demo data ignores the query's filters.
+        return [f for f in page if f.get("cluster_id") == cluster_id]
 
-    # Filter by cluster_id (demo data ignores the query's filters)
-    findings = [f for f in all_findings if f.get("cluster_id") == cluster_id]
+    # ``timestamp DESC`` returns undated findings first, so without dated_only a
+    # cluster's own undated findings could fill the page ahead of its dated ones.
+    findings = in_cluster(
+        data_service.get_findings(limit=1000, cluster_id=cluster_id, dated_only=True)
+    )
 
-    if not findings:
+    # An all-undated cluster still exists, so it is checked apart from the page.
+    if not findings and not in_cluster(
+        data_service.get_findings(limit=1, cluster_id=cluster_id)
+    ):
         raise HTTPException(
             status_code=404, detail="Cluster not found or has no findings"
         )

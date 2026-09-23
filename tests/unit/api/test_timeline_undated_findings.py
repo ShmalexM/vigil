@@ -187,3 +187,20 @@ def test_a_page_of_undated_findings_does_not_hide_a_cluster(client, undated_page
 
     assert r.status_code == 200, r.text
     assert _finding_ids(r.json()) == ["tl-dated"]
+
+
+def test_a_clusters_own_undated_findings_do_not_hide_its_dated_ones(client):
+    # LogLM parquet ingest sets cluster_id from attack_id on the same rows that
+    # can arrive without an event time.
+    _seed(
+        *(
+            _finding(f"tl-crowd-{i:04d}", None, cluster_id="tl-cluster")
+            for i in range(PAGE)
+        ),
+        _finding("tl-dated", T0, cluster_id="tl-cluster"),
+    )
+
+    r = client.get("/api/timeline/cluster/tl-cluster")
+
+    assert r.status_code == 200, r.text
+    assert _finding_ids(r.json()) == ["tl-dated"]
