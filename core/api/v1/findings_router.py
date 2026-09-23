@@ -162,10 +162,11 @@ def get_findings_summary():
     total_count = len(findings)
 
     for finding in findings:
-        severity = finding.get("severity", "unknown")
+        # `or`, not a get default: LogLM parquet ingest stores a null severity.
+        severity = finding.get("severity") or "unknown"
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
 
-        data_source = finding.get("data_source", "unknown")
+        data_source = finding.get("data_source") or "unknown"
         data_source_counts[data_source] = data_source_counts.get(data_source, 0) + 1
 
     return {

@@ -262,12 +262,18 @@ async def get_timeline_range(
     start_time = normalize_timestamp(start) if start else None
     end_time = normalize_timestamp(end) if end else None
 
-    # Get findings
-    all_findings = data_service.get_findings(limit=limit)
+    # Undated findings are left out in the query rather than skipped after it:
+    # timestamp DESC puts NULLs first in Postgres, so a page of them would
+    # otherwise fill the limit and leave the dashboard's timeline empty.
+    all_findings = data_service.get_findings(limit=limit, dated_only=True)
 
     events: List[TimelineEvent] = []
 
     for finding in all_findings:
+        # The demo data service ignores dated_only; a finding with no time cannot
+        # be placed on a timeline either way.
+        if not finding.get("timestamp"):
+            continue
         f_time = normalize_timestamp(finding["timestamp"])
 
         # Filter by time range if specified
