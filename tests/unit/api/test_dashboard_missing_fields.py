@@ -20,13 +20,18 @@ from core.time import utcnow
 pytestmark = [pytest.mark.unit, pytest.mark.external_service, pytest.mark.database]
 
 
-@pytest.fixture(autouse=True)
-def _clean():
+def _delete_test_findings():
     with unit_of_work() as session:
         session.query(Finding).filter(Finding.finding_id.like("mf-%")).delete(
             synchronize_session=False
         )
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    _delete_test_findings()
     yield
+    _delete_test_findings()
 
 
 def _create(finding_id, *, timestamp=None, severity=None):

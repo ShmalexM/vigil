@@ -593,6 +593,7 @@ export const configApi = {
   }) => api.post('/config/darktrace', data),
 
   getOrchestrator: () => api.get('/config/orchestrator'),
+  getIntent: () => api.get('/config/intent'),
   setOrchestrator: (data: {
     enabled: boolean
     dry_run: boolean
