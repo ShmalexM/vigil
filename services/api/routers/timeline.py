@@ -264,8 +264,12 @@ async def get_timeline_range(
 
     # Undated findings are left out in the query rather than skipped after it:
     # timestamp DESC puts NULLs first in Postgres, so a page of them would
-    # otherwise fill the limit and leave the dashboard's timeline empty.
-    all_findings = data_service.get_findings(limit=limit, dated_only=True)
+    # otherwise fill the limit and leave the dashboard's timeline empty. Findings
+    # naming an analyst-excluded IP are left out too: this is the dashboard's
+    # timeline, and it describes the queue.
+    all_findings = data_service.get_findings(
+        limit=limit, dated_only=True, exclusions="hide"
+    )
 
     events: List[TimelineEvent] = []
 

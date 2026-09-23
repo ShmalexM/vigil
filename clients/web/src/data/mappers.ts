@@ -43,6 +43,8 @@ export interface ApiFinding {
     source_evidence?: unknown
     [key: string]: unknown
   }
+  /** set by the findings API: the finding's addresses that are excluded */
+  excluded_ips?: string[]
 }
 
 export function initials(name?: string): string {
@@ -166,6 +168,7 @@ export function mapApiFinding(f: ApiFinding): Finding {
     score: typeof f.anomaly_score === 'number' ? f.anomaly_score : null,
     status: findingStatus(f.status),
     extra: extraEntities(ec),
+    excludedIps: f.excluded_ips ?? [],
   }
 }
 

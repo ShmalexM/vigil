@@ -22,7 +22,8 @@ export function useDesktopNotifications() {
 
     const tick = async () => {
       try {
-        const res = await findingsApi.getAll({ limit: 25 })
+        // excluded IPs are hidden from the queue, so they page nobody either
+        const res = await findingsApi.getAll({ limit: 25, exclusions: 'hide' })
         const list = (res.data as { findings?: ListedFinding[] })?.findings || []
         if (!baselined) {
           // establish a baseline so we don't notify for the existing backlog

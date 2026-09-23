@@ -45,6 +45,11 @@ vi.mock('../services/api', () => ({
       }),
     getSummary: () => Promise.resolve({ data: { total: 7, by_status: { open: 5, investigating: 1, closed: 1 } } }),
   },
+  exclusionsApi: {
+    list: () => Promise.resolve({ data: { exclusions: [], total: 0 } }),
+    create: vi.fn(),
+    remove: vi.fn(),
+  },
   findingsApi: {
     getAll: () =>
       Promise.resolve({

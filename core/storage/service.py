@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from core.exceptions import default_on_error
 from core.storage.case_repository import CaseRepository
 from core.storage.connection import get_db_manager
+from core.storage.ip_exclusion_repository import exclusion_view_filter
 from core.storage.models import (
     AIDecisionLog,
     Case,
@@ -51,7 +52,9 @@ def _set_mitre_prediction_rows(finding: Finding, mitre_predictions: Any) -> None
         )
 
 
-def findings_by_technique_stmt(technique_id: str, limit: Optional[int] = None):
+def findings_by_technique_stmt(
+    technique_id: str, limit: Optional[int] = None, exclusions: str = "include"
+):
     """Findings predicting ``technique_id``, highest confidence first."""
     stmt = (
         select(Finding)
@@ -63,6 +66,9 @@ def findings_by_technique_stmt(technique_id: str, limit: Optional[int] = None):
         .order_by(FindingMitrePrediction.confidence.desc())
         .options(selectinload(Finding.mitre_prediction_rows))
     )
+    exclusion_filter = exclusion_view_filter(exclusions)
+    if exclusion_filter is not None:
+        stmt = stmt.where(exclusion_filter)
     if limit is not None:
         stmt = stmt.limit(limit)
     return stmt
@@ -202,6 +208,7 @@ class DatabaseService:
         sort_order: str = "desc",
         timestamp_start: Optional[datetime] = None,
         timestamp_end: Optional[datetime] = None,
+        exclusions: str = "include",
         dated_only: bool = False,
     ) -> List[Finding]:
         """
@@ -218,6 +225,8 @@ class DatabaseService:
             offset: Offset for pagination
             sort_by: Column to sort by (timestamp, anomaly_score, severity)
             sort_order: Sort direction (asc, desc)
+            exclusions: ``include`` (default), ``hide`` or ``only`` findings
+                naming an analyst-excluded IP (core.findings.exclusions)
             dated_only: leave out findings whose source gave no timestamp
 
         Returns:
@@ -255,6 +264,9 @@ class DatabaseService:
                         Finding.description.ilike(f"%{search_query}%")
                     )
                 filters.append(or_(*search_clauses))
+            exclusion_filter = exclusion_view_filter(exclusions)
+            if exclusion_filter is not None:
+                filters.append(exclusion_filter)
 
             if filters:
                 query = query.where(and_(*filters))
@@ -319,6 +331,7 @@ class DatabaseService:
         min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None,
         search_query: Optional[str] = None,
+        exclusions: str = "include",
     ) -> int:
         """
         Count findings matching the given filters without loading rows.
@@ -351,6 +364,9 @@ class DatabaseService:
                         cast(Finding.entity_context, String).ilike(f"%{search_query}%"),
                     )
                 )
+            exclusion_filter = exclusion_view_filter(exclusions)
+            if exclusion_filter is not None:
+                filters.append(exclusion_filter)
 
             if filters:
                 query = query.where(and_(*filters))
@@ -426,12 +442,19 @@ class DatabaseService:
 
     @default_on_error(list)
     def get_findings_by_technique(
-        self, technique_id: str, limit: Optional[int] = None
+        self,
+        technique_id: str,
+        limit: Optional[int] = None,
+        exclusions: str = "include",
     ) -> List[Finding]:
         """Findings predicting ``technique_id``, ordered by confidence descending."""
         with self.db_manager.session_scope() as session:
             findings = (
-                session.execute(findings_by_technique_stmt(technique_id, limit=limit))
+                session.execute(
+                    findings_by_technique_stmt(
+                        technique_id, limit=limit, exclusions=exclusions
+                    )
+                )
                 .scalars()
                 .all()
             )
@@ -445,6 +468,7 @@ class DatabaseService:
         min_confidence: float = 0.0,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        exclusions: str = "include",
     ) -> List[tuple]:
         """(technique_id, severity, count) from the child table."""
         with self.db_manager.session_scope() as session:
@@ -465,6 +489,9 @@ class DatabaseService:
                 stmt = stmt.where(Finding.timestamp >= start_time)
             if end_time is not None:
                 stmt = stmt.where(Finding.timestamp <= end_time)
+            exclusion_filter = exclusion_view_filter(exclusions)
+            if exclusion_filter is not None:
+                stmt = stmt.where(exclusion_filter)
             return [
                 (tid, severity, int(count))
                 for tid, severity, count in session.execute(stmt).all()

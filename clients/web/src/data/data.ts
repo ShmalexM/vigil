@@ -50,6 +50,9 @@ export interface Finding {
    *  these (CrowdStrike sends device_id and no dest_ips, Splunk the reverse), so
    *  they are carried through and rendered as columns derived from the rows. */
   extra?: Record<string, string>
+  /** addresses on this finding an analyst has excluded; non-empty means the
+   *  queue hides it by default */
+  excludedIps?: string[]
 }
 
 export const MISSING_FINDING_SCORE = 'Not provided' as const

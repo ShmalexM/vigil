@@ -100,10 +100,13 @@ def occurrence_rollup(
         start_time = end_time = None
         if time_range != "all":
             start_time, end_time = get_time_range(time_range)
+        # The dashboard's counts describe the queue, which analyst-excluded IPs
+        # are not in (core.findings.exclusions); a coverage run keeps them.
         severity_rows = data_service.get_technique_severity_counts(
             min_confidence=min_confidence,
             start_time=start_time,
             end_time=end_time,
+            exclusions="hide",
         )
         technique_counts: dict[str, int] = {}
         technique_severities: dict[str, dict[str, int]] = {}
@@ -127,7 +130,7 @@ def occurrence_rollup(
                 technique_severities[resolved_id].get(sev_key, 0) + count
             )
     else:
-        findings = data_service.get_findings()
+        findings = data_service.get_findings(exclusions="hide")
 
         if time_range != "all":
             start_time, end_time = get_time_range(time_range)
@@ -203,11 +206,14 @@ def get_findings_by_technique(technique_id: str):
     Returns:
         List of findings
     """
+    # Hidden like the rollup it drills into, so its count and this list agree.
     if data_service.is_using_database():
-        matching_findings = data_service.get_findings_by_technique(technique_id)
+        matching_findings = data_service.get_findings_by_technique(
+            technique_id, exclusions="hide"
+        )
     else:
         matching_findings = []
-        for finding in data_service.get_findings():
+        for finding in data_service.get_findings(exclusions="hide"):
             for tech in iter_techniques(finding):
                 if (tech.get("technique_id") or tech.get("id")) == technique_id:
                     matching_findings.append(finding)

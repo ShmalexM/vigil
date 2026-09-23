@@ -15,11 +15,12 @@ the allowed direction).
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from core.findings.exclusions import cached_active_ips, excluded_ips_of
 from core.findings.source_evidence import (
     normalize_finding_source_evidence,
     project_finding_source_evidence_for_list,
@@ -37,6 +38,29 @@ ROUTER_META = RouterMeta(
 )
 logger = logging.getLogger(__name__)
 data_service = DatabaseDataService()
+
+
+ExclusionView = Literal["include", "hide", "only"]
+
+_EXCLUSIONS_QUERY = Query(
+    "include",
+    description=(
+        "Findings naming an analyst-excluded IP: include them (default), hide "
+        "them, or return only them. Each finding carries `excluded_ips`."
+    ),
+)
+_SUMMARY_EXCLUSIONS_QUERY = Query(
+    "include",
+    description=(
+        "Count findings naming an analyst-excluded IP (include, the default), "
+        "leave them out (hide), or count only them (only)."
+    ),
+)
+
+
+def _annotate_exclusions(finding: Dict[str, Any], active) -> Dict[str, Any]:
+    finding["excluded_ips"] = excluded_ips_of(finding, active)
+    return finding
 
 
 class FindingUpdate(BaseModel):
@@ -86,6 +110,7 @@ def get_findings(
     limit: int = Query(100, ge=1, le=1000),
     sort_by: str = Query("timestamp"),
     sort_order: str = Query("desc"),
+    exclusions: ExclusionView = _EXCLUSIONS_QUERY,
 ):
     """
     Get findings with optional filters, search, and server-side pagination.
@@ -102,6 +127,7 @@ def get_findings(
         min_anomaly_score=min_anomaly_score,
         status=status,
         search_query=search,
+        exclusions=exclusions,
     )
     findings = data_service.get_findings(
         limit=limit,
@@ -114,11 +140,16 @@ def get_findings(
         search_query=search,
         sort_by=sort_by,
         sort_order=sort_order,
+        exclusions=exclusions,
     )
+    active = cached_active_ips()
 
     return {
         "findings": [
-            project_finding_source_evidence_for_list(finding) for finding in findings
+            _annotate_exclusions(
+                project_finding_source_evidence_for_list(finding), active
+            )
+            for finding in findings
         ],
         "total": total,
         "offset": offset,
@@ -144,18 +175,20 @@ def get_finding(finding_id: str):
     finding = data_service.get_finding(finding_id)
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
-    return normalize_finding_source_evidence(finding)
+    return _annotate_exclusions(
+        normalize_finding_source_evidence(finding), cached_active_ips()
+    )
 
 
 @router.get("/stats/summary", response_model=FindingsSummaryResponse)
-def get_findings_summary():
+def get_findings_summary(exclusions: ExclusionView = _SUMMARY_EXCLUSIONS_QUERY):
     """
     Get summary statistics for findings.
 
     Returns:
         Summary statistics
     """
-    findings = data_service.get_findings()
+    findings = data_service.get_findings(exclusions=exclusions)
 
     severity_counts: Dict[str, int] = {}
     data_source_counts: Dict[str, int] = {}

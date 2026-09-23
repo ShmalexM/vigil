@@ -4769,6 +4769,23 @@
             }
           },
           {
+            "description": "Findings naming an analyst-excluded IP: include them (default), hide them, or return only them. Each finding carries `excluded_ips`.",
+            "in": "query",
+            "name": "exclusions",
+            "required": false,
+            "schema": {
+              "default": "include",
+              "description": "Findings naming an analyst-excluded IP: include them (default), hide them, or return only them. Each finding carries `excluded_ips`.",
+              "enum": [
+                "include",
+                "hide",
+                "only"
+              ],
+              "title": "Exclusions",
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -4817,6 +4834,23 @@
       "get": {
         "operationId": "get_api_v1_findings_stats_summary",
         "parameters": [
+          {
+            "description": "Count findings naming an analyst-excluded IP (include, the default), leave them out (hide), or count only them (only).",
+            "in": "query",
+            "name": "exclusions",
+            "required": false,
+            "schema": {
+              "default": "include",
+              "description": "Count findings naming an analyst-excluded IP (include, the default), leave them out (hide), or count only them (only).",
+              "enum": [
+                "include",
+                "hide",
+                "only"
+              ],
+              "title": "Exclusions",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",

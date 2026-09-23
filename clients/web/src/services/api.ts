@@ -159,6 +159,9 @@ export const approvalsApi = {
     api.post(`/approvals/${actionId}/reject`, { reason, rejected_by }),
 }
 
+/** how a findings read treats findings naming an analyst-excluded IP */
+export type ExclusionView = 'include' | 'hide' | 'only'
+
 export const findingsApi = {
   getAll: (params?: {
     severity?: string
@@ -166,11 +169,13 @@ export const findingsApi = {
     cluster_id?: number
     min_anomaly_score?: number
     limit?: number
+    exclusions?: ExclusionView
   }) => api.get('/findings', { params }),
   
   getById: (id: string) => api.get(`/findings/${id}`),
   
-  getSummary: () => api.get('/findings/stats/summary'),
+  getSummary: (params?: { exclusions?: ExclusionView }) =>
+    api.get('/findings/stats/summary', { params }),
   
   export: (format: 'json' | 'jsonl' = 'json') =>
     api.post('/findings/export', null, { params: { output_format: format } }),
@@ -187,6 +192,37 @@ export const findingsApi = {
     }),
 
   deleteAll: () => api.delete('/findings/all'),
+}
+
+export interface IpExclusion {
+  exclusion_id: string
+  ip: string
+  reason: string
+  origin: 'ad_hoc' | 'finding' | 'case' | 'run'
+  origin_ref?: string | null
+  created_by: string
+  created_at?: string | null
+  removed_at?: string | null
+  removed_by?: string | null
+  removal_reason?: string | null
+  active: boolean
+  /** stored findings naming this address; active rows only */
+  hidden_findings?: number | null
+}
+
+export const exclusionsApi = {
+  list: (includeRemoved = false) =>
+    api.get<{ exclusions: IpExclusion[]; total: number; hidden_findings_total: number }>('/exclusions', {
+      params: { include_removed: includeRemoved },
+    }),
+  create: (body: {
+    ip: string
+    reason: string
+    origin?: IpExclusion['origin']
+    origin_ref?: string
+  }) => api.post<IpExclusion>('/exclusions', body),
+  remove: (id: string, reason?: string) =>
+    api.post<IpExclusion>(`/exclusions/${encodeURIComponent(id)}/remove`, { reason: reason || null }),
 }
 
 export const casesApi = {

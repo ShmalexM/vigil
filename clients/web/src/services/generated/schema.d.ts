@@ -3494,6 +3494,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/exclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Exclusions
+         * @description Active exclusions, newest first; ``include_removed`` adds the history.
+         */
+        get: operations["get_api_exclusions"];
+        put?: never;
+        /**
+         * Add Exclusion
+         * @description Exclude one address. 409 when it is already actively excluded.
+         */
+        post: operations["post_api_exclusions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exclusions/{exclusion_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove
+         * @description Stop excluding the address. The row is kept, marked removed, so the
+         *     queue's history stays explainable; its findings reappear unchanged.
+         */
+        post: operations["post_api_exclusions_exclusion_id_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/federation/health": {
         parameters: {
             query?: never;
@@ -9401,6 +9446,74 @@ export interface components {
             source?: string | null;
             /** Tags */
             tags?: string[] | null;
+        };
+        /** ExclusionCreate */
+        ExclusionCreate: {
+            /**
+             * Ip
+             * @description One IPv4 or IPv6 address.
+             */
+            ip: string;
+            /**
+             * Origin
+             * @default ad_hoc
+             * @enum {string}
+             */
+            origin: "ad_hoc" | "finding" | "case" | "run";
+            /**
+             * Origin Ref
+             * @description The finding, case or run it was made from.
+             */
+            origin_ref?: string | null;
+            /** Reason */
+            reason: string;
+        };
+        /** ExclusionListResponse */
+        ExclusionListResponse: {
+            /** Exclusions */
+            exclusions: components["schemas"]["ExclusionOut"][];
+            /**
+             * Hidden Findings Total
+             * @description Findings the queue hides, each counted once.
+             */
+            hidden_findings_total: number;
+            /** Total */
+            total: number;
+        };
+        /** ExclusionOut */
+        ExclusionOut: {
+            /** Active */
+            active: boolean;
+            /** Created At */
+            created_at?: string | null;
+            /** Created By */
+            created_by: string;
+            /** Exclusion Id */
+            exclusion_id: string;
+            /**
+             * Hidden Findings
+             * @description Stored findings naming this address (active rows only).
+             */
+            hidden_findings?: number | null;
+            /** Ip */
+            ip: string;
+            /** Origin */
+            origin: string;
+            /** Origin Ref */
+            origin_ref?: string | null;
+            /** Reason */
+            reason: string;
+            /** Removal Reason */
+            removal_reason?: string | null;
+            /** Removed At */
+            removed_at?: string | null;
+            /** Removed By */
+            removed_by?: string | null;
+        };
+        /** ExclusionRemove */
+        ExclusionRemove: {
+            /** Reason */
+            reason?: string | null;
         };
         /** FederationGlobalSettings */
         FederationGlobalSettings: {
@@ -17536,6 +17649,111 @@ export interface operations {
             };
         };
     };
+    get_api_exclusions: {
+        parameters: {
+            query?: {
+                include_removed?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_api_exclusions: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExclusionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_api_exclusions_exclusion_id_remove: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                exclusion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ExclusionRemove"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_api_federation_health: {
         parameters: {
             query?: never;
@@ -17760,6 +17978,8 @@ export interface operations {
                 limit?: number;
                 sort_by?: string;
                 sort_order?: string;
+                /** @description Findings naming an analyst-excluded IP: include them (default), hide them, or return only them. Each finding carries `excluded_ips`. */
+                exclusions?: "include" | "hide" | "only";
             };
             header?: {
                 authorization?: string | null;
@@ -17890,7 +18110,10 @@ export interface operations {
     };
     get_api_findings_stats_summary: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Count findings naming an analyst-excluded IP (include, the default), leave them out (hide), or count only them (only). */
+                exclusions?: "include" | "hide" | "only";
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -23498,6 +23721,8 @@ export interface operations {
                 limit?: number;
                 sort_by?: string;
                 sort_order?: string;
+                /** @description Findings naming an analyst-excluded IP: include them (default), hide them, or return only them. Each finding carries `excluded_ips`. */
+                exclusions?: "include" | "hide" | "only";
             };
             header?: {
                 authorization?: string | null;
@@ -23529,7 +23754,10 @@ export interface operations {
     };
     get_api_v1_findings_stats_summary: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Count findings naming an analyst-excluded IP (include, the default), leave them out (hide), or count only them (only). */
+                exclusions?: "include" | "hide" | "only";
+            };
             header?: {
                 authorization?: string | null;
             };

@@ -118,6 +118,7 @@ class DatabaseDataService:
         sort_order: str = "desc",
         timestamp_start: Optional[datetime] = None,
         timestamp_end: Optional[datetime] = None,
+        exclusions: str = "include",
         dated_only: bool = False,
     ) -> List[Dict]:
         if self._demo_mode and self._demo_service:
@@ -137,6 +138,7 @@ class DatabaseDataService:
                     sort_order=sort_order,
                     timestamp_start=timestamp_start,
                     timestamp_end=timestamp_end,
+                    exclusions=exclusions,
                     dated_only=dated_only,
                 )
                 return FindingSchema.dump_many(findings)
@@ -167,6 +169,7 @@ class DatabaseDataService:
         min_anomaly_score: Optional[float] = None,
         status: Optional[str] = None,
         search_query: Optional[str] = None,
+        exclusions: str = "include",
     ) -> int:
         if self._demo_mode and self._demo_service:
             return len(self._demo_service.get_findings(10000))
@@ -179,6 +182,7 @@ class DatabaseDataService:
                     min_anomaly_score=min_anomaly_score,
                     status=status,
                     search_query=search_query,
+                    exclusions=exclusions,
                 )
             except Exception as e:
                 logger.error(f"Error counting findings from DB: {e}")
@@ -198,14 +202,17 @@ class DatabaseDataService:
         return None
 
     def get_findings_by_technique(
-        self, technique_id: str, limit: Optional[int] = None
+        self,
+        technique_id: str,
+        limit: Optional[int] = None,
+        exclusions: str = "include",
     ) -> List[Dict]:
         """Findings predicting ``technique_id`` from the child table. DB only."""
         if not self._db_available or not self._db_service:
             return []
         try:
             findings = self._db_service.get_findings_by_technique(
-                technique_id, limit=limit
+                technique_id, limit=limit, exclusions=exclusions
             )
             return FindingSchema.dump_many(findings)
         except Exception as e:
@@ -217,6 +224,7 @@ class DatabaseDataService:
         min_confidence: float = 0.0,
         start_time=None,
         end_time=None,
+        exclusions: str = "include",
     ) -> list:
         if not self._db_available or not self._db_service:
             return []
@@ -225,6 +233,7 @@ class DatabaseDataService:
                 min_confidence=min_confidence,
                 start_time=start_time,
                 end_time=end_time,
+                exclusions=exclusions,
             )
         except Exception as e:
             logger.error(f"Error getting technique severity counts from DB: {e}")
