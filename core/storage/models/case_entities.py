@@ -495,7 +495,11 @@ class CaseTemplate(Base):
     # Template metadata
     tags: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # server_default too: this table exists only through create_all, and the
+    # 05_case_management_extended.sql seed writes it with raw SQL.
+    usage_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

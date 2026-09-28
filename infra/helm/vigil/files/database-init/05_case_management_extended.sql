@@ -90,7 +90,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-malware-001',
     'Malware Investigation',
@@ -117,7 +117,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1059', 'T1055', 'T1486', 'T1566'],
     ARRAY['malware', 'incident-response'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Phishing Investigation Template
@@ -125,7 +126,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-phishing-001',
     'Phishing Investigation',
@@ -151,7 +152,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1566.001', 'T1566.002', 'T1204'],
     ARRAY['phishing', 'email-security'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Data Exfiltration Template
@@ -159,7 +161,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-data-exfiltration-001',
     'Data Exfiltration Investigation',
@@ -186,7 +188,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1048', 'T1041', 'T1567', 'T1020'],
     ARRAY['data-breach', 'exfiltration', 'critical'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Insider Threat Template
@@ -194,7 +197,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-insider-threat-001',
     'Insider Threat Investigation',
@@ -221,7 +224,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1078', 'T1530', 'T1213'],
     ARRAY['insider-threat', 'ueba'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Ransomware Template
@@ -229,7 +233,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-ransomware-001',
     'Ransomware Incident',
@@ -259,7 +263,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1486', 'T1490', 'T1489', 'T1562'],
     ARRAY['ransomware', 'critical', 'business-continuity'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Account Compromise Template
@@ -267,7 +272,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-account-compromise-001',
     'Account Compromise',
@@ -294,7 +299,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1078', 'T1110', 'T1552'],
     ARRAY['account-compromise', 'credential-theft'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- DDoS Attack Template
@@ -302,7 +308,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-ddos-001',
     'DDoS Attack Response',
@@ -329,7 +335,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1498', 'T1499'],
     ARRAY['ddos', 'availability', 'network-attack'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- Web Application Attack Template
@@ -337,7 +344,7 @@ INSERT INTO case_templates (
     template_id, name, description, template_type,
     default_priority, default_status, default_sla_policy_id,
     task_templates, playbook_steps, applicable_mitre_techniques,
-    tags, is_active
+    tags, is_active, usage_count
 ) VALUES (
     'template-webapp-attack-001',
     'Web Application Attack',
@@ -364,7 +371,8 @@ INSERT INTO case_templates (
     ]'::jsonb,
     ARRAY['T1190', 'T1211', 'T1505'],
     ARRAY['web-attack', 'application-security'],
-    true
+    true,
+    0
 ) ON CONFLICT (template_id) DO NOTHING;
 
 -- =============================================================================

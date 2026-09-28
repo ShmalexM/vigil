@@ -302,6 +302,23 @@ def add_intake_trigger_case_id(conn):
 
 
 # ---------------------------------------------------------------------------
+# case_templates table
+# ---------------------------------------------------------------------------
+
+# Only create_all builds this table, and until the model declared a server
+# default it made usage_count NOT NULL with none, so raw SQL that omitted the
+# column failed: every template in 05_case_management_extended.sql did. The seed
+# now names it; this gives tables built before the fix the default a new one has.
+@migration("Set case_templates.usage_count server default to 0")
+def set_case_template_usage_count_default(conn):
+    if not _table_exists(conn, 'case_templates'):
+        return
+    conn.execute(text("""
+        ALTER TABLE case_templates ALTER COLUMN usage_count SET DEFAULT 0;
+    """))
+
+
+# ---------------------------------------------------------------------------
 # Seed data
 # ---------------------------------------------------------------------------
 
