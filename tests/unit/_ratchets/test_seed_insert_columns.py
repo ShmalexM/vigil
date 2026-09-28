@@ -10,22 +10,18 @@ with ``case_templates.usage_count``. The appliers tolerated the failures, so the
 default templates were never seeded and nothing said so.
 """
 
-import re
 from pathlib import Path
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table
 
 from core.storage.models import Base
-from core.storage.reference_seed import split_statements
+from core.storage.reference_seed import INSERT_TARGET, split_statements, target_table
 
 pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[3]
 INIT_SQL = REPO / "infra" / "database" / "init"
-
-# The target table, then the column list when there is one.
-INSERT = re.compile(r"INSERT\s+INTO\s+([\w.\"]+)\s*(?:\(([^)]*)\))?", re.IGNORECASE)
 
 
 def _inserts(sql: str):
@@ -35,8 +31,8 @@ def _inserts(sql: str):
     the statements they execute.
     """
     for statement in split_statements(sql):
-        for match in INSERT.finditer(statement):
-            table = match.group(1).replace('"', "").split(".")[-1]
+        for match in INSERT_TARGET.finditer(statement):
+            table = target_table(match)
             columns = match.group(2)
             if columns is not None:
                 columns = {c.strip().strip('"') for c in columns.split(",")}

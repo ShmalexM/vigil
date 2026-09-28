@@ -14,7 +14,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import SQLAlchemyError
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEED_FILE = "05_case_management_extended.sql"
@@ -25,8 +25,12 @@ SEED_DIRS = (Path("infra") / "database" / "init", Path("database") / "init")
 # psql-style client directives the SQL files may carry; the driver rejects them.
 _SKIP_PREFIXES = ("\\", "\\connect", "\\c ")
 _DOLLAR_TAG = re.compile(r"\$[A-Za-z_0-9]*\$")
-# An INSERT that starts a statement, after any comment lines above it.
-_INSERT = re.compile(r"(?:\s*--[^\n]*\n)*\s*INSERT\s+INTO\s+([\w\"]+)", re.IGNORECASE)
+# The target table, schema-qualified or quoted or neither, then the column list
+# when there is one.
+INSERT_TARGET = re.compile(
+    r"INSERT\s+INTO\s+([\w.\"]+)\s*(?:\(([^)]*)\))?", re.IGNORECASE
+)
+_LEADING_COMMENTS = re.compile(r"(?:\s*--[^\n]*\n)*\s*")
 
 
 def split_statements(sql: str) -> Iterator[str]:
@@ -79,13 +83,19 @@ def find_seed_file(root: Path = REPO_ROOT) -> Optional[Path]:
     return None
 
 
+def target_table(match: "re.Match[str]") -> str:
+    """The table an ``INSERT_TARGET`` match names, without schema or quotes."""
+    return match.group(1).replace('"', "").split(".")[-1]
+
+
 def inserts_by_table(sql: str) -> Dict[str, List[str]]:
     """The statements that are INSERTs, grouped by target table in file order."""
     tables: Dict[str, List[str]] = {}
     for statement in split_statements(sql):
-        match = _INSERT.match(statement)
+        start = _LEADING_COMMENTS.match(statement).end()
+        match = INSERT_TARGET.match(statement, start)
         if match:
-            tables.setdefault(match.group(1).strip('"'), []).append(statement)
+            tables.setdefault(target_table(match), []).append(statement)
     return tables
 
 
@@ -123,8 +133,9 @@ def seed_empty_tables(
                     conn.execute(text(statement)).rowcount for statement in statements
                 )
             savepoint.commit()
-        except DBAPIError as e:
+        except SQLAlchemyError as e:
             savepoint.rollback()
             inserted.pop(table, None)
-            failed[table] = str(e.orig).splitlines()[0]
+            message = str(getattr(e, "orig", e)).splitlines()
+            failed[table] = message[0] if message else type(e).__name__
     return inserted, failed
