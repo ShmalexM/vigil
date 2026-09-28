@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -63,14 +64,14 @@ class SLAPolicy(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -132,14 +133,14 @@ class CaseSLA(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -194,14 +195,14 @@ class CaseComment(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -235,7 +236,7 @@ class CaseWatcher(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
     # Indexes
@@ -295,14 +296,14 @@ class CaseEvidence(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -364,14 +365,14 @@ class CaseIOC(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -429,14 +430,14 @@ class CaseTask(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -499,14 +500,14 @@ class CaseTemplate(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
     # Indexes
@@ -550,7 +551,7 @@ class CaseRelationship(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
     # Indexes
@@ -600,14 +601,14 @@ class CaseMetrics(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
         default=utcnow,
         onupdate=utcnow,
-        server_default="now()",
+        server_default=text("now()"),
     )
 
 
@@ -650,7 +651,7 @@ class CaseAttachment(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
     # Indexes
@@ -710,7 +711,7 @@ class CaseClosureInfo(Base):
 
     # Timestamps
     closed_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
 
@@ -748,7 +749,7 @@ class CaseEscalation(Base):
 
     # Timestamps
     escalated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
     acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -801,7 +802,7 @@ class CaseAuditLog(Base):
 
     # Timestamp
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
     # Indexes
@@ -858,7 +859,7 @@ class CaseNotification(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utcnow, server_default="now()"
+        DateTime, nullable=False, default=utcnow, server_default=text("now()")
     )
 
     # Indexes

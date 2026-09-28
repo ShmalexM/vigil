@@ -214,6 +214,48 @@ def create_missing_tables(conn):
 
 
 # ---------------------------------------------------------------------------
+# Frozen now() defaults
+# ---------------------------------------------------------------------------
+
+# The models once declared server_default="now()", a plain string, which
+# create_all renders as the literal DEFAULT 'now()'. Postgres folds that to a
+# timestamp at CREATE TABLE, so every table the ORM built holds its own creation
+# time as the default, and a raw-SQL INSERT that omits the column is stamped with
+# it. The models now say text("now()"), but create_all never alters a table it
+# finds. Only a column the models default to now() is touched, and only while
+# its default is a literal or missing, so a second run alters nothing. This also
+# covers the findings and cases columns fixed by hand above.
+@migration("Replace frozen now() server defaults with now()")
+def fix_frozen_now_defaults(conn):
+    from sqlalchemy.schema import DefaultClause
+    from core.storage.models import Base
+    declared = {
+        (table.name, column.name)
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if isinstance(column.server_default, DefaultClause)
+        and str(column.server_default.arg) == 'now()'
+    }
+    live = conn.execute(text("""
+        SELECT table_name, column_name FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND (column_default IS NULL OR column_default LIKE '''%')
+    """)).all()
+    stale = sorted(declared & {tuple(row) for row in live})
+    quote = conn.dialect.identifier_preparer.quote
+    for table, column in stale:
+        conn.execute(text(
+            f"ALTER TABLE {quote(table)} ALTER COLUMN {quote(column)} SET DEFAULT now();"
+        ))
+    if stale:
+        logger.info(f"  Reset {len(stale)} column default(s) to now(): "
+                    + ", ".join(f"{t}.{c}" for t, c in stale))
+    else:
+        logger.info("  No frozen now() defaults")
+    return stale
+
+
+# ---------------------------------------------------------------------------
 # Episodic memory
 # ---------------------------------------------------------------------------
 
