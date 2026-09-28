@@ -93,18 +93,6 @@ def add_findings_description(conn):
         ALTER TABLE findings ADD COLUMN IF NOT EXISTS description TEXT;
     """))
 
-@migration("Fix findings.created_at server default to now()")
-def fix_findings_created_at(conn):
-    conn.execute(text("""
-        ALTER TABLE findings ALTER COLUMN created_at SET DEFAULT now();
-    """))
-
-@migration("Fix findings.updated_at server default to now()")
-def fix_findings_updated_at(conn):
-    conn.execute(text("""
-        ALTER TABLE findings ALTER COLUMN updated_at SET DEFAULT now();
-    """))
-
 @migration("Create GIN trigram index on findings.description")
 def create_findings_description_gin_index(conn):
     conn.execute(text("""
@@ -116,18 +104,6 @@ def create_findings_description_gin_index(conn):
 # ---------------------------------------------------------------------------
 # cases table
 # ---------------------------------------------------------------------------
-
-@migration("Fix cases.created_at server default to now()")
-def fix_cases_created_at(conn):
-    conn.execute(text("""
-        ALTER TABLE cases ALTER COLUMN created_at SET DEFAULT now();
-    """))
-
-@migration("Fix cases.updated_at server default to now()")
-def fix_cases_updated_at(conn):
-    conn.execute(text("""
-        ALTER TABLE cases ALTER COLUMN updated_at SET DEFAULT now();
-    """))
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +199,7 @@ def create_missing_tables(conn):
 # time as the default, and a raw-SQL INSERT that omits the column is stamped with
 # it. The models now say text("now()"), but create_all never alters a table it
 # finds. Only a column the models default to now() is touched, and only while
-# its default is a literal or missing, so a second run alters nothing. This also
-# covers the findings and cases columns fixed by hand above.
+# its default is a literal or missing, so a second run alters nothing.
 @migration("Replace frozen now() server defaults with now()")
 def fix_frozen_now_defaults(conn):
     from sqlalchemy.schema import DefaultClause
