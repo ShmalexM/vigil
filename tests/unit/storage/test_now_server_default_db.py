@@ -25,8 +25,7 @@ FROZEN = text("""
     WHERE table_schema = current_schema() AND column_default LIKE '''%''::timestamp%'
     """)
 
-# The column list of the 05_case_management_extended.sql seed, which names no
-# timestamp and so takes the table's defaults.
+# A raw-SQL INSERT that names no timestamp, so it takes the table's defaults.
 SEED_POLICY = text("""
     INSERT INTO sla_policies (
         policy_id, name, description, priority_level,
