@@ -466,6 +466,10 @@ def run_migrations(url=None):
     engine = create_engine(url)
     applied, skipped, failed = [], [], []
     try:
+        # Each step connects on its own, so an unreachable database would
+        # otherwise fail, or wait out the TCP timeout, once per step.
+        with engine.connect():
+            pass
         for number, (desc, fn) in enumerate(MIGRATIONS, 1):
             logger.info(f"[{number}/{len(MIGRATIONS)}] {desc}")
             try:
