@@ -203,8 +203,9 @@ def add_llm_interaction_rate_columns(conn):
 
 # create_all is checkfirst=True, so a table that already exists gets no new index
 # from the model. A hunt handing off looks this column up twice per escalation.
-# 12_workflow_runs.sql creates the table without it, and on Helm the table
-# belongs to the chart's user, so vigil_app passes here only once it exists.
+# On Helm the table belongs to the chart's user, so vigil_app passes here only
+# once the index exists. 36_workflow_runs_triggered_by_index.sql builds it
+# there; this step covers a database that init SQL never reached.
 @migration("Create idx_workflow_runs_triggered_by index")
 def create_workflow_runs_triggered_by_index(conn):
     if _index_exists(conn, 'idx_workflow_runs_triggered_by'):
