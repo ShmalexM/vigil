@@ -31,6 +31,7 @@ class AWSSecurityHubIngestion(SIEMIngestionService):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
+        oldest_first: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Fetch findings from AWS Security Hub.
@@ -39,6 +40,10 @@ class AWSSecurityHubIngestion(SIEMIngestionService):
             start_time: Start time for finding query
             end_time: End time for finding query
             limit: Maximum number of findings to fetch
+            oldest_first: Sort by ``CreatedAt`` ascending, so a batch that
+                fills ``limit`` is a contiguous oldest-first prefix of the
+                window. Federation asks for this; the default keeps the API's
+                own order for the daemon poller.
 
         Returns:
             List of raw finding dictionaries
@@ -86,7 +91,14 @@ class AWSSecurityHubIngestion(SIEMIngestionService):
             findings = []
             paginator = client.get_paginator("get_findings")
 
-            for page in paginator.paginate(Filters=filters, MaxResults=min(limit, 100)):
+            page_args: Dict[str, Any] = {
+                "Filters": filters,
+                "MaxResults": min(limit, 100),
+            }
+            if oldest_first:
+                page_args["SortCriteria"] = [{"Field": "CreatedAt", "SortOrder": "asc"}]
+
+            for page in paginator.paginate(**page_args):
                 findings.extend(page["Findings"])
                 if len(findings) >= limit:
                     break

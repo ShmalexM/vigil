@@ -31,6 +31,7 @@ class AzureSentinelIngestion(SIEMIngestionService):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
+        oldest_first: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Fetch incidents from Azure Sentinel.
@@ -39,6 +40,11 @@ class AzureSentinelIngestion(SIEMIngestionService):
             start_time: Start time for incident query
             end_time: End time for incident query
             limit: Maximum number of incidents to fetch
+            oldest_first: Return the ``limit`` oldest incidents in the window,
+                sorted by creation time. The SDK iterator is unordered, so this
+                scans the whole window before applying ``limit``. Federation
+                asks for this; the default stops at ``limit`` in API order, as
+                the daemon poller has always read.
 
         Returns:
             List of raw incident dictionaries
@@ -84,6 +90,7 @@ class AzureSentinelIngestion(SIEMIngestionService):
 
             # Fetch incidents
             incidents = []
+            created_times = []  # parallel to incidents; the oldest_first sort key
             incident_list = client.incidents.list(
                 resource_group_name=resource_group, workspace_name=workspace_name
             )
@@ -98,6 +105,7 @@ class AzureSentinelIngestion(SIEMIngestionService):
                     if created < start_time or created > end_time:
                         continue
 
+                created_times.append(created)  # naive UTC, or None when unset
                 incidents.append(
                     {
                         "id": incident.name,
@@ -134,8 +142,22 @@ class AzureSentinelIngestion(SIEMIngestionService):
                     }
                 )
 
-                if len(incidents) >= limit:
+                if not oldest_first and len(incidents) >= limit:
                     break
+
+            if oldest_first:
+                # Finish the scan first: the iterator is unordered, so stopping
+                # at limit before sorting would hand back an arbitrary subset.
+                # An incident with no created time sorts last, so it cannot
+                # take a slot ahead of a dated one or anchor the cursor.
+                order = sorted(
+                    range(len(incidents)),
+                    key=lambda i: (
+                        created_times[i] is None,
+                        created_times[i] or datetime.min,
+                    ),
+                )
+                incidents = [incidents[i] for i in order[:limit]]
 
             logger.info(f"Fetched {len(incidents)} incidents from Azure Sentinel")
             return incidents

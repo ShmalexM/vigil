@@ -94,6 +94,7 @@ class MicrosoftDefenderIngestion(SIEMIngestionService):
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         limit: int = 100,
+        oldest_first: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Fetch alerts from Microsoft Defender.
@@ -102,6 +103,10 @@ class MicrosoftDefenderIngestion(SIEMIngestionService):
             start_time: Start time for alert query
             end_time: End time for alert query
             limit: Maximum number of alerts to fetch
+            oldest_first: Order by creation time ascending, so a batch that
+                fills ``limit`` is a contiguous oldest-first prefix of the
+                window. Federation asks for this; the default stays newest
+                first for the daemon poller.
 
         Returns:
             List of raw alert dictionaries
@@ -130,7 +135,11 @@ class MicrosoftDefenderIngestion(SIEMIngestionService):
             params = {
                 "$filter": f"alertCreationTime ge {start_time.isoformat()}Z and alertCreationTime le {end_time.isoformat()}Z",
                 "$top": limit,
-                "$orderby": "alertCreationTime desc",
+                "$orderby": (
+                    "alertCreationTime asc"
+                    if oldest_first
+                    else "alertCreationTime desc"
+                ),
             }
 
             response = await asyncio.to_thread(
